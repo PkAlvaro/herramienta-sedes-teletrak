@@ -1,0 +1,32 @@
+  <section class="tab" id="tab-carga">
+    <div class="max-w-3xl mx-auto space-y-5 py-4">
+      <div class="flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <h1 class="text-xl font-bold text-slate-800 font-['Barlow_Semi_Condensed',sans-serif] tracking-tight">Bienvenido al Planificador de Red de Sedes</h1>
+          <p class="text-xs text-slate-500 mt-0.5">Carga un archivo Excel o retoma un análisis guardado para comenzar</p>
+        </div>
+        <button class="btn-s flex items-center gap-1.5 hidden shrink-0" id="btn-volver-analisis" onclick="if(window.volverAlAnalisis) window.volverAlAnalisis()" title="Volver al análisis activo">
+          <svg class="w-4 h-4 fill-none stroke-current" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M10 19l-7-7m0 0l7-7m-7 7h18"/></svg>
+          <span>Volver al análisis</span>
+        </button>
+      </div>
+
+      <div class="card" id="card-recientes" hidden>
+        <h2>Retomar análisis</h2>
+        <div id="recientes"></div>
+      </div>
+
+      <div class="card fld">
+        <h2>Nuevo análisis</h2>
+        <div class="flex flex-wrap items-center gap-3">
+          <input type="file" id="f-excel" accept=".xlsx,.xlsm,.xls">
+          <button class="btn-p" id="btn-analizar" disabled>Analizar</button>
+        </div>
+        <div class="prog mt-4" id="prog" hidden><div></div></div>
+        <div class="flex items-center gap-3 mt-1"><div class="text-xs text-slate-600" id="prog-txt"></div>
+          <button class="btn-s hidden" id="btn-saltar" title="Analiza sin esperar las direcciones. Las ya encontradas quedan guardadas.">Seguir sin mapa</button></div>
+        <div class="text-xs text-red-700 mt-2" id="error"></div>
+        <span class="hidden" id="estado-py"></span>
+      </div>
+    </div>
+  </section>

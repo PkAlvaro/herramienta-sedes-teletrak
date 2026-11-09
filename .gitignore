@@ -1,0 +1,17 @@
+# Datos reales y resultados nunca se versionan
+*.xlsx
+*.xls
+*.csv
+*.sedes.json
+resultados/
+datos/
+!plantilla_sedes.xlsx
+!datos_ejemplo/*.xlsx
+!datos_ejemplo/*.csv
+!sedes/datos_publicos/*.csv
+
+.venv/
+ui/app.html
+__pycache__/
+*.egg-info/
+.pytest_cache/

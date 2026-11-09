@@ -1,0 +1,1340 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EVALPRO · Mini-Dashboard Demanda & Gravitación Huff Teletrak (65 Sedes)</title>
+  
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Chart.js CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            turf: {
+              50: '#F0FDF4',
+              100: '#DCFCE7',
+              500: '#22C55E',
+              700: '#15803D',
+              800: '#166534',
+              900: '#0F5132'
+            },
+            gold: {
+              50: '#FFFBEB',
+              100: '#FEF3C7',
+              500: '#F59E0B',
+              600: '#D97706',
+              700: '#B45309'
+            },
+            pizarra: {
+              800: '#1E293B',
+              900: '#0F172A'
+            }
+          }
+        }
+      }
+    }
+  </script>
+  
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+    body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; }
+    .custom-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
+    .custom-scroll::-webkit-scrollbar-track { background: #F1F5F9; }
+    .custom-scroll::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 3px; }
+    .custom-scroll::-webkit-scrollbar-thumb:hover { background: #94A3B8; }
+    .active-pill { background-color: #166534 !important; color: #FFFFFF !important; border-color: #166534 !important; }
+    .active-hipo-HCH { background-color: #1E3A8A !important; color: #FFFFFF !important; }
+    .active-hipo-CHS { background-color: #7C3AED !important; color: #FFFFFF !important; }
+    .active-hipo-VSC { background-color: #0284C7 !important; color: #FFFFFF !important; }
+    .active-hipo-CHC { background-color: #D97706 !important; color: #FFFFFF !important; }
+    .active-hipo-ALL { background-color: #0F172A !important; color: #FFFFFF !important; }
+    .closure-item.is-closed {
+      background-color: #FEF3C7 !important;
+      border-color: #F59E0B !important;
+      color: #78350F !important;
+    }
+  </style>
+</head>
+
+<body class="bg-[#F8FAFC] text-slate-800 min-h-screen flex flex-col antialiased custom-scroll">
+
+  <!-- HEADER INSTITUCIONAL HIPODROMO / TELETRAK -->
+  <header class="bg-white border-b border-slate-200 px-6 py-3.5 sticky top-0 z-50 shadow-sm">
+    <div class="max-w-[1560px] mx-auto flex flex-col lg:flex-row items-start lg:items-center justify-between gap-3">
+      
+      <!-- Marca y Título -->
+      <div class="flex items-center space-x-3.5">
+        <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-turf-800 to-gold-600 flex items-center justify-center font-extrabold text-white text-base shadow-sm tracking-wider">
+          TLK
+        </div>
+        <div>
+          <div class="flex items-center space-x-2">
+            <h1 class="text-base font-extrabold text-pizarra-900 tracking-tight">TELETRAK · Dashboard Interactivo de Demanda</h1>
+            <span class="px-2 py-0.5 text-[11px] font-bold rounded bg-turf-50 text-turf-800 border border-turf-100">Modelo Gravitacional Huff</span>
+            <span class="px-2 py-0.5 text-[11px] font-bold rounded bg-gold-50 text-gold-700 border border-gold-100">65 Sedes Vigentes</span>
+            <span class="px-2 py-0.5 text-[11px] font-bold rounded bg-slate-100 text-slate-700 border border-slate-200">Solo Demanda</span>
+          </div>
+          <p class="text-xs text-slate-500 mt-0.5">
+            Desestacionalización Limpia (2021–2026) · Proyección Quinquenal Amortiguada (2027–2031) · Matriz Espacial Completa 65×65
+          </p>
+        </div>
+      </div>
+
+      <!-- Toggles Principales de Visualización -->
+      <div class="flex flex-wrap items-center gap-2.5">
+        <!-- Moneda -->
+        <div class="bg-slate-100 p-0.5 rounded-lg flex items-center text-xs font-semibold border border-slate-200">
+          <button id="btnReal" onclick="setCurrency('REAL')" class="px-3 py-1 rounded-md transition-all active-pill">Real (Sep-26)</button>
+          <button id="btnNom" onclick="setCurrency('NOMINAL')" class="px-3 py-1 rounded-md transition-all text-slate-600 hover:text-slate-900">Nominal</button>
+        </div>
+
+        <!-- Frecuencia -->
+        <div class="bg-slate-100 p-0.5 rounded-lg flex items-center text-xs font-semibold border border-slate-200">
+          <button id="btnMensual" onclick="setTimeMode('MONTHLY')" class="px-3 py-1 rounded-md transition-all active-pill">Mensual</button>
+          <button id="btnAnual" onclick="setTimeMode('ANNUAL')" class="px-3 py-1 rounded-md transition-all text-slate-600 hover:text-slate-900">Anual</button>
+        </div>
+
+        <!-- Serie Limpia vs Cruda -->
+        <div class="bg-slate-100 p-0.5 rounded-lg flex items-center text-xs font-semibold border border-slate-200">
+          <button id="btnLimpia" onclick="setSeriesMode('CLEAN')" class="px-3 py-1 rounded-md transition-all active-pill">Serie Limpia</button>
+          <button id="btnCruda" onclick="setSeriesMode('RAW')" class="px-3 py-1 rounded-md transition-all text-slate-600 hover:text-slate-900">Serie Cruda</button>
+        </div>
+      </div>
+      
+    </div>
+  </header>
+
+  <!-- CONTENIDO PRINCIPAL -->
+  <main class="max-w-[1560px] mx-auto w-full px-6 py-5 space-y-5 flex-1">
+
+    <!-- BARRA DE SELECCIÓN Y FILTROS -->
+    <div class="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4">
+      
+      <!-- Selector de Entidad / Sede -->
+      <div class="flex-1 max-w-md">
+        <label class="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1">Entidad / Sede Focal:</label>
+        <div class="relative">
+          <select id="entitySelect" onchange="onEntityChange(this.value)" class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2 text-sm font-bold text-pizarra-900 focus:ring-2 focus:ring-turf-700 focus:outline-none transition-all cursor-pointer">
+            <optgroup label="── Portafolios Consolidados ──">
+              <option value="CONSOLIDADO_G9" selected>⭐ Cartera Focal G9 (9 Sedes RM)</option>
+              <option value="CONSOLIDADO_RED">🌐 Red Nacional Vigente (65 Sedes)</option>
+            </optgroup>
+            <optgroup label="── Grupo G9 (9 Sedes RM) ──" id="optgroupG9"></optgroup>
+            <optgroup label="── Resto Región Metropolitana (37 Sedes) ──" id="optgroupRM"></optgroup>
+            <optgroup label="── Sedes en Regiones (16 Sedes) ──" id="optgroupReg"></optgroup>
+            <optgroup label="── Canales Digitales / Virtuales (3 Sedes) ──" id="optgroupDig"></optgroup>
+          </select>
+        </div>
+      </div>
+
+      <!-- Selector por Hipódromo Organizador -->
+      <div class="flex flex-col">
+        <label class="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1">Hipódromo Organizador:</label>
+        <div class="flex flex-wrap items-center gap-1.5" id="hipoButtonsContainer">
+          <button onclick="setHipodromo('ALL')" id="hipo_ALL" class="px-3 py-1.5 rounded-xl text-xs font-bold border border-slate-300 transition-all active-hipo-ALL shadow-xs">Todos los Hipódromos</button>
+          <button onclick="setHipodromo('HCH')" id="hipo_HCH" class="px-3 py-1.5 rounded-xl text-xs font-bold border border-slate-300 transition-all text-slate-700 hover:bg-blue-50 shadow-xs">HCH · Hipódromo Chile</button>
+          <button onclick="setHipodromo('CHS')" id="hipo_CHS" class="px-3 py-1.5 rounded-xl text-xs font-bold border border-slate-300 transition-all text-slate-700 hover:bg-purple-50 shadow-xs">CHS · Club Hípico Stgo</button>
+          <button onclick="setHipodromo('VSC')" id="hipo_VSC" class="px-3 py-1.5 rounded-xl text-xs font-bold border border-slate-300 transition-all text-slate-700 hover:bg-sky-50 shadow-xs">VSC · Sporting Viña</button>
+          <button onclick="setHipodromo('CHC')" id="hipo_CHC" class="px-3 py-1.5 rounded-xl text-xs font-bold border border-slate-300 transition-all text-slate-700 hover:bg-amber-50 shadow-xs">CHC · Concepción</button>
+        </div>
+      </div>
+
+      <!-- Botón Reset -->
+      <div class="flex items-end">
+        <button onclick="resetAllDefaults()" class="px-3.5 py-2 rounded-xl text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 transition-all flex items-center space-x-1.5">
+          <span>🔄 Resetear Parámetros</span>
+        </button>
+      </div>
+
+    </div>
+
+    <!-- TARJETAS KPIS DE DEMANDA -->
+    <div class="grid grid-cols-2 md:grid-cols-5 gap-3.5">
+      
+      <div class="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">
+        <span class="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">Demanda Base 2026</span>
+        <div class="text-xl font-extrabold text-pizarra-900 mt-1" id="kpiBase26">$0.0 M</div>
+        <span class="text-[11px] text-slate-500 mt-0.5 block" id="kpiBaseSub">Últimos 12 meses obs.</span>
+      </div>
+
+      <div class="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">
+        <span class="text-[11px] font-bold text-turf-800 uppercase tracking-wider block">Proyección Base 2027–31</span>
+        <div class="text-xl font-extrabold text-turf-800 mt-1" id="kpiProyBase">$0.0 M</div>
+        <span class="text-[11px] text-slate-500 mt-0.5 block" id="kpiProyProm">Promedio: $0.0 M/año</span>
+      </div>
+
+      <div class="bg-white rounded-2xl border border-amber-200 bg-amber-50/40 p-4 shadow-sm">
+        <span class="text-[11px] font-bold text-gold-700 uppercase tracking-wider block">+ Captura Cierres (Huff)</span>
+        <div class="text-xl font-extrabold text-gold-700 mt-1" id="kpiCapturaHuff">+$0.0 M</div>
+        <span class="text-[11px] font-bold text-gold-600 mt-0.5 block" id="kpiPctCaptura">+0.0% sobre base</span>
+      </div>
+
+      <div class="bg-white rounded-2xl border border-slate-300 p-4 shadow-sm bg-gradient-to-br from-white to-turf-50/30">
+        <span class="text-[11px] font-bold text-pizarra-900 uppercase tracking-wider block">= Nueva Demanda Total</span>
+        <div class="text-xl font-extrabold text-pizarra-900 mt-1" id="kpiTotalProy">$0.0 M</div>
+        <span class="text-[11px] font-bold text-turf-700 mt-0.5 block" id="kpiDeltaTotal">Var. Neta: 0.0%</span>
+      </div>
+
+      <div class="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">
+        <span class="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">Fuga Canal Digital (U₀)</span>
+        <div class="text-xl font-extrabold text-slate-700 mt-1" id="kpiFugaDigital">0.0%</div>
+        <span class="text-[11px] text-slate-500 mt-0.5 block" id="kpiFugaVol">$0.0 M fuera de red</span>
+      </div>
+
+    </div>
+
+    <!-- SECCIÓN PRINCIPAL: GRÁFICO + PANEL LATERAL HUFF & SLIDERS -->
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-5">
+
+      <!-- COLUMNA IZQUIERDA: GRÁFICO PRINCIPAL DE DEMANDA (8 Cols) -->
+      <div class="lg:col-span-8 space-y-5">
+        
+        <!-- Tarjeta de Gráfico -->
+        <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-4">
+          <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
+            <div>
+              <h2 class="text-base font-bold text-pizarra-900 tracking-tight" id="chartTitle">Demanda Mensual (2021–2031)</h2>
+              <p class="text-xs text-slate-500" id="chartSubtitle">Histórico observado vs. Proyección estocástica Monte Carlo y efecto gravitacional Huff</p>
+            </div>
+            
+            <!-- Badges de Leyenda -->
+            <div class="flex flex-wrap items-center gap-2 text-[11px] font-semibold">
+              <span class="flex items-center space-x-1 text-slate-500">
+                <span class="w-2.5 h-2.5 rounded-full bg-slate-400 inline-block"></span>
+                <span>Cruda</span>
+              </span>
+              <span class="flex items-center space-x-1 text-turf-700">
+                <span class="w-2.5 h-2.5 rounded-full bg-turf-700 inline-block"></span>
+                <span>Limpia</span>
+              </span>
+              <span class="flex items-center space-x-1 text-turf-500">
+                <span class="w-2.5 h-2.5 rounded-full bg-turf-500 inline-block"></span>
+                <span>Base P50</span>
+              </span>
+              <span class="flex items-center space-x-1 text-gold-600 font-bold">
+                <span class="w-2.5 h-2.5 rounded-full bg-gold-600 inline-block"></span>
+                <span>Total Post-Cierre (Huff)</span>
+              </span>
+            </div>
+          </div>
+
+          <!-- Canvas del Gráfico Principal -->
+          <div class="relative w-full h-[400px]">
+            <canvas id="mainDemandChart"></canvas>
+          </div>
+        </div>
+
+        <!-- Gráfico Anual y Tabla de Trayectoria Anual -->
+        <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-4">
+          <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+            <div>
+              <h3 class="text-sm font-bold text-pizarra-900 tracking-tight">Trayectoria Anual Consolidada (2022–2031)</h3>
+              <p class="text-xs text-slate-500">Desglose de demanda histórica realizada y quinquenio proyectado</p>
+            </div>
+            <div class="text-xs font-bold text-slate-600" id="badgeTotal5Y">Total 5Y: $0.0 M</div>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-12 gap-4 items-center">
+            <div class="md:col-span-6 h-[200px]">
+              <canvas id="annualBarChart"></canvas>
+            </div>
+            
+            <div class="md:col-span-6 overflow-x-auto">
+              <table class="w-full text-xs text-left">
+                <thead>
+                  <tr class="border-b border-slate-200 text-slate-500 font-bold">
+                    <th class="py-1.5">Año</th>
+                    <th class="py-1.5 text-right">Base</th>
+                    <th class="py-1.5 text-right text-gold-700">+ Huff</th>
+                    <th class="py-1.5 text-right font-extrabold text-pizarra-900">= Total</th>
+                  </tr>
+                </thead>
+                <tbody id="annualTableBody" class="divide-y divide-slate-100 font-medium"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- COLUMNA DERECHA: SIMULADOR HUFF Y CONTROLES DINÁMICOS (4 Cols) -->
+      <div class="lg:col-span-4 space-y-5">
+        
+        <!-- PANEL SIMULADOR GRAVITACIONAL DE HUFF -->
+        <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-4">
+          <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+            <div>
+              <h2 class="text-sm font-extrabold text-pizarra-900 uppercase tracking-wider flex items-center space-x-1.5">
+                <span class="w-2 h-2 rounded-full bg-gold-600 inline-block"></span>
+                <span>Simulador de Cierres (Huff)</span>
+              </h2>
+              <p class="text-xs text-slate-500 mt-0.5">Selecciona sedes a cerrar en la red (65 sedes vigentes)</p>
+            </div>
+            <span id="closedCountBadge" class="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-slate-100 text-slate-600 border border-slate-200 transition-all">
+              0 cerradas
+            </span>
+          </div>
+
+          <!-- Botones de Acción Rápida -->
+          <div class="space-y-2">
+            <div class="flex flex-wrap items-center gap-1.5">
+              <button onclick="toggleClosure('TLK-36')" class="px-2.5 py-1 rounded-lg text-[11px] font-bold bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 transition-all">⚡ Rosa O'Higgins</button>
+              <button onclick="toggleGroupClosure(['TLK-14', 'TLK-31', 'TLK-36'])" class="px-2.5 py-1 rounded-lg text-[11px] font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 transition-all">⚡ 3 Menores G9</button>
+              <button onclick="clearClosures()" class="px-2.5 py-1 rounded-lg text-[11px] font-bold bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 transition-all ml-auto">🧹 Limpiar Todo</button>
+            </div>
+            
+            <!-- Acciones de Cierre Masivo por Grupo -->
+            <div class="flex flex-wrap items-center gap-1.5 pt-1 border-t border-slate-100">
+              <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider mr-0.5">Cerrar Grupo:</span>
+              <button onclick="toggleEntireGroup('G9')" id="btnGrp_G9" class="px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 transition-all">G9 (9)</button>
+              <button onclick="toggleEntireGroup('RM')" id="btnGrp_RM" class="px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 transition-all">Resto RM (37)</button>
+              <button onclick="toggleEntireGroup('REGIONES')" id="btnGrp_REGIONES" class="px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 transition-all">Regiones (16)</button>
+            </div>
+          </div>
+
+          <!-- Buscador y Pestañas por Categoría -->
+          <div class="space-y-2 pt-2 border-t border-slate-100">
+            <!-- Buscador en tiempo real -->
+            <div class="relative">
+              <input type="text" id="huffSearchInput" placeholder="🔍 Buscar sede por ID o nombre (ej: TLK-36, Renca, Buin)..." oninput="filterClosureCheckboxes()" class="w-full text-xs px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 focus:bg-white focus:ring-1 focus:ring-gold-500 focus:outline-none transition-all">
+            </div>
+
+            <!-- Filtros Rápidos por Grupo -->
+            <div class="flex items-center gap-1 text-[10px] font-semibold overflow-x-auto pb-0.5 custom-scroll" id="closureGroupTabs">
+              <button onclick="setClosureGroupFilter('ALL')" id="tab_ALL" class="px-2.5 py-1 rounded-md bg-pizarra-900 text-white font-bold whitespace-nowrap transition-all shadow-xs">Todas (65)</button>
+              <button onclick="setClosureGroupFilter('G9')" id="tab_G9" class="px-2.5 py-1 rounded-md bg-slate-100 hover:bg-slate-200 text-slate-600 whitespace-nowrap transition-all">G9 (9)</button>
+              <button onclick="setClosureGroupFilter('RM')" id="tab_RM" class="px-2.5 py-1 rounded-md bg-slate-100 hover:bg-slate-200 text-slate-600 whitespace-nowrap transition-all">Resto RM (37)</button>
+              <button onclick="setClosureGroupFilter('REGIONES')" id="tab_REGIONES" class="px-2.5 py-1 rounded-md bg-slate-100 hover:bg-slate-200 text-slate-600 whitespace-nowrap transition-all">Regiones (16)</button>
+              <button onclick="setClosureGroupFilter('DIGITAL')" id="tab_DIGITAL" class="px-2.5 py-1 rounded-md bg-slate-100 hover:bg-slate-200 text-slate-600 whitespace-nowrap transition-all">Digitales (3)</button>
+            </div>
+          </div>
+
+          <!-- Checkboxes de Sedes (65 Sedes Organizadas por Grupos) -->
+          <div class="space-y-1 max-h-[250px] overflow-y-auto pr-1 custom-scroll" id="closureCheckboxesContainer">
+            <!-- Inyectado dinámicamente por JavaScript -->
+          </div>
+
+          <!-- Parámetros Gravitacionales -->
+          <div class="pt-3 border-t border-slate-100 space-y-3">
+            <div class="flex items-center justify-between text-xs font-semibold text-slate-600">
+              <span>Fricción Distancia (λ):</span>
+              <span class="font-extrabold text-pizarra-900" id="valLambda">4.0</span>
+            </div>
+            <input type="range" min="1.0" max="6.0" step="0.1" value="4.0" id="sliderLambda" oninput="onHuffParamChange()" class="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-gold-600">
+            
+            <div class="flex items-center justify-between text-xs font-semibold text-slate-600">
+              <span>Fuga Digital Fuera de Red (U₀):</span>
+              <span class="font-extrabold text-pizarra-900" id="valU0">0.1736</span>
+            </div>
+            <input type="range" min="0.0" max="0.80" step="0.01" value="0.1736" id="sliderU0" oninput="onHuffParamChange()" class="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-gold-600">
+          </div>
+
+          <!-- Flujos Gravitacionales hacia la Sede Actual / Cartera -->
+          <div class="pt-3 border-t border-slate-100 space-y-2">
+            <div class="flex items-center justify-between">
+              <span class="text-[11px] font-bold text-slate-500 uppercase tracking-wider block" id="huffFlowTableTitle">Flujos de Captura hacia Sede:</span>
+              <span class="text-[10px] text-slate-400 font-semibold" id="huffFlowTableSummary"></span>
+            </div>
+            <div class="max-h-[160px] overflow-y-auto custom-scroll text-xs">
+              <table class="w-full text-left">
+                <thead class="text-slate-400 font-bold border-b border-slate-100" id="huffFlowTableHead">
+                  <tr>
+                    <th class="py-1">Cerrada</th>
+                    <th class="py-1 text-right">Dist (km)</th>
+                    <th class="py-1 text-right">P(ij)</th>
+                    <th class="py-1 text-right text-gold-700">Captura/año</th>
+                  </tr>
+                </thead>
+                <tbody id="huffFlowTableBody" class="divide-y divide-slate-100">
+                  <tr><td colspan="4" class="py-2.5 text-center text-slate-400">Sin locales cerrados activos.</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- PANEL DE PARÁMETROS DINÁMICOS -->
+        <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-4">
+          <div class="flex items-center justify-between border-b border-slate-100 pb-2.5">
+            <h3 class="text-sm font-extrabold text-pizarra-900 uppercase tracking-wider flex items-center space-x-1.5">
+              <span class="w-2 h-2 rounded-full bg-turf-700 inline-block"></span>
+              <span>Parámetros de Demanda</span>
+            </h3>
+            <button onclick="restoreCleanG1()" class="text-[11px] font-bold text-turf-700 hover:underline">Restaurar g₁ Limpio</button>
+          </div>
+
+          <!-- Slider g1 -->
+          <div class="space-y-1.5">
+            <div class="flex items-center justify-between text-xs font-semibold text-slate-600">
+              <span>Tendencia Orgánica Anual (g₁):</span>
+              <span class="font-extrabold text-pizarra-900" id="valG1">0.0%</span>
+            </div>
+            <input type="range" min="-20.0" max="15.0" step="0.1" value="0.0" id="sliderG1" oninput="onDynamicParamChange()" class="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-turf-700">
+          </div>
+
+          <!-- Slider Shrinkage -->
+          <div class="space-y-1.5">
+            <div class="flex items-center justify-between text-xs font-semibold text-slate-600">
+              <span>Contracción / Shrinkage (κ):</span>
+              <span class="font-extrabold text-pizarra-900" id="valShrinkage">50%</span>
+            </div>
+            <input type="range" min="0" max="100" step="5" value="50" id="sliderShrinkage" oninput="onDynamicParamChange()" class="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-turf-700">
+          </div>
+
+          <!-- Slider Amortiguación phi -->
+          <div class="space-y-1.5">
+            <div class="flex items-center justify-between text-xs font-semibold text-slate-600">
+              <span>Amortiguación Anual (φ):</span>
+              <span class="font-extrabold text-pizarra-900" id="valPhi">0.94</span>
+            </div>
+            <input type="range" min="0.50" max="1.00" step="0.01" value="0.94" id="sliderPhi" oninput="onDynamicParamChange()" class="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-turf-700">
+            <span class="text-[10px] text-slate-400 block">Factor mensual: φ^(h/12) acumulado en el quinquenio</span>
+          </div>
+
+          <!-- Slider Shock Manual -->
+          <div class="space-y-1.5">
+            <div class="flex items-center justify-between text-xs font-semibold text-slate-600">
+              <span>Shock Manual de Nivel (Δ%):</span>
+              <span class="font-extrabold text-pizarra-900" id="valShock">0%</span>
+            </div>
+            <input type="range" min="-30" max="30" step="1" value="0" id="sliderShock" oninput="onDynamicParamChange()" class="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-turf-700">
+          </div>
+
+          <!-- Slider Inflación -->
+          <div class="space-y-1.5">
+            <div class="flex items-center justify-between text-xs font-semibold text-slate-600">
+              <span>Inflación Anual Proyectada (π):</span>
+              <span class="font-extrabold text-pizarra-900" id="valInfl">3.0%</span>
+            </div>
+            <input type="range" min="0.0" max="10.0" step="0.5" value="3.0" id="sliderInfl" oninput="onDynamicParamChange()" class="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-turf-700">
+          </div>
+
+        </div>
+
+      </div>
+
+    </div>
+
+  </main>
+
+  <!-- FOOTER -->
+  <footer class="bg-white border-t border-slate-200 px-6 py-4 text-center text-xs text-slate-500">
+    <div class="max-w-[1560px] mx-auto flex flex-col sm:flex-row items-center justify-between gap-2">
+      <span>EVALPRO · Mini-Dashboard de Demanda & Gravitación Huff · Red Teletrak Chile (65 Sedes Vigentes)</span>
+      <span class="text-slate-400">Datos históricos deflactados a Sep-2026 · Simulación Espacial 100% Client-Side</span>
+    </div>
+  </footer>
+
+  <!-- EMBEDDED DATASET COMPLETO -->
+  <script>
+    const DASHBOARD_DATA = {};
+  </script>
+
+  <!-- MOTOR INTERACTIVO Y GRÁFICOS (JAVASCRIPT PURO) -->
+  <script>
+    // ESTADO GLOBAL DE LA APLICACIÓN
+    let state = {
+      currentEntity: 'CONSOLIDADO_G9',
+      currentHipodromo: 'ALL',
+      currencyMode: 'REAL',     // 'REAL' | 'NOMINAL'
+      timeMode: 'MONTHLY',       // 'MONTHLY' | 'ANNUAL'
+      seriesMode: 'CLEAN',       // 'CLEAN' | 'RAW'
+      
+      // Parámetros Huff
+      lambda: 4.0,
+      u0: 0.1736,
+      closedStores: new Set(),
+      currentClosureTab: 'ALL',
+      
+      // Parámetros Dinámicos
+      g1_override: null,
+      shrinkage: 0.50,
+      phi: 0.94,
+      levelShockPct: 0.0,
+      inflationRate: 0.030
+    };
+
+    let mainChartInstance = null;
+    let annualChartInstance = null;
+
+    // INICIALIZACIÓN
+    window.addEventListener('DOMContentLoaded', () => {
+      initSelectors();
+      initClosureCheckboxes();
+      loadEntityDefaults(state.currentEntity);
+      renderAll();
+    });
+
+    function initSelectors() {
+      const optG9 = document.getElementById('optgroupG9');
+      const optRM = document.getElementById('optgroupRM');
+      const optReg = document.getElementById('optgroupReg');
+      const optDig = document.getElementById('optgroupDig');
+      
+      optG9.innerHTML = '';
+      optRM.innerHTML = '';
+      optReg.innerHTML = '';
+      optDig.innerHTML = '';
+
+      // Grupo G9
+      DASHBOARD_DATA.g9_ids.forEach(id => {
+        const loc = DASHBOARD_DATA.locales[id];
+        const opt = document.createElement('option');
+        opt.value = id;
+        opt.textContent = `${id} · ${loc.nombre}`;
+        optG9.appendChild(opt);
+      });
+
+      // Resto RM
+      DASHBOARD_DATA.rm_ids.forEach(id => {
+        const loc = DASHBOARD_DATA.locales[id];
+        const opt = document.createElement('option');
+        opt.value = id;
+        opt.textContent = `${id} · ${loc.nombre}`;
+        optRM.appendChild(opt);
+      });
+
+      // Regiones
+      DASHBOARD_DATA.regiones_ids.forEach(id => {
+        const loc = DASHBOARD_DATA.locales[id];
+        const opt = document.createElement('option');
+        opt.value = id;
+        opt.textContent = `${id} · ${loc.nombre}`;
+        optReg.appendChild(opt);
+      });
+
+      // Digitales
+      DASHBOARD_DATA.digital_ids.forEach(id => {
+        const loc = DASHBOARD_DATA.locales[id];
+        const opt = document.createElement('option');
+        opt.value = id;
+        opt.textContent = `${id} · ${loc.nombre}`;
+        optDig.appendChild(opt);
+      });
+    }
+
+    function initClosureCheckboxes() {
+      const container = document.getElementById('closureCheckboxesContainer');
+      container.innerHTML = '';
+
+      const groups = [
+        { key: 'G9', title: 'Grupo G9 (9 Sedes RM)', ids: DASHBOARD_DATA.g9_ids, badgeBg: 'bg-emerald-100 text-emerald-800' },
+        { key: 'RM', title: 'Resto Región Metropolitana (37 Sedes)', ids: DASHBOARD_DATA.rm_ids, badgeBg: 'bg-blue-100 text-blue-800' },
+        { key: 'REGIONES', title: 'Sedes en Regiones (16 Sedes)', ids: DASHBOARD_DATA.regiones_ids, badgeBg: 'bg-purple-100 text-purple-800' },
+        { key: 'DIGITAL', title: 'Canales Digitales (3)', ids: DASHBOARD_DATA.digital_ids, badgeBg: 'bg-sky-100 text-sky-800' }
+      ];
+
+      groups.forEach(grp => {
+        const sectionHeader = document.createElement('div');
+        sectionHeader.className = 'text-[10px] font-extrabold text-slate-500 uppercase tracking-wider pt-2.5 pb-1 px-1 bg-slate-50 rounded group-header flex items-center justify-between';
+        sectionHeader.dataset.group = grp.key;
+        sectionHeader.innerHTML = `
+          <span>── ${grp.title} ──</span>
+          <span class="text-[9px] px-1.5 py-0.2 rounded font-bold ${grp.badgeBg}">${grp.ids.length}</span>
+        `;
+        container.appendChild(sectionHeader);
+
+        grp.ids.forEach(id => {
+          const loc = DASHBOARD_DATA.locales[id];
+          const label = document.createElement('label');
+          label.className = 'closure-item flex items-center space-x-2 text-xs p-1.5 rounded-lg hover:bg-slate-50 cursor-pointer transition-all border border-transparent hover:border-slate-200';
+          label.dataset.id = id;
+          label.dataset.name = loc.nombre.toLowerCase();
+          label.dataset.group = grp.key;
+          
+          const salesStr = `$${loc.venta_base_2026_mm.toFixed(0)}M`;
+          
+          label.innerHTML = `
+            <input type="checkbox" value="${id}" onchange="onClosureToggle(this)" class="rounded text-gold-600 focus:ring-gold-500 h-3.5 w-3.5 border-slate-300">
+            <span class="font-bold text-pizarra-900 w-14 shrink-0">${id}</span>
+            <span class="text-slate-600 truncate flex-1" title="${loc.nombre}">${loc.nombre}</span>
+            <span class="text-[10px] text-slate-400 font-mono font-medium">${salesStr}</span>
+          `;
+          container.appendChild(label);
+        });
+      });
+    }
+
+    function filterClosureCheckboxes() {
+      const query = (document.getElementById('huffSearchInput').value || '').toLowerCase().trim();
+      const currentTab = state.currentClosureTab;
+      
+      const items = document.querySelectorAll('.closure-item');
+      const countsByGroup = { 'G9': 0, 'RM': 0, 'REGIONES': 0, 'DIGITAL': 0 };
+
+      items.forEach(el => {
+        const itemGrp = el.dataset.group;
+        const matchesTab = (currentTab === 'ALL' || itemGrp === currentTab);
+        const matchesSearch = (!query || el.dataset.id.toLowerCase().includes(query) || el.dataset.name.includes(query));
+        
+        if (matchesTab && matchesSearch) {
+          el.style.display = 'flex';
+          countsByGroup[itemGrp] = (countsByGroup[itemGrp] || 0) + 1;
+        } else {
+          el.style.display = 'none';
+        }
+      });
+
+      // Ocultar cabeceras de grupo si no tienen items visibles
+      document.querySelectorAll('.group-header').forEach(header => {
+        const grpKey = header.dataset.group;
+        if (countsByGroup[grpKey] > 0) {
+          header.style.display = 'flex';
+        } else {
+          header.style.display = 'none';
+        }
+      });
+    }
+
+    function setClosureGroupFilter(tabKey) {
+      state.currentClosureTab = tabKey;
+      ['ALL', 'G9', 'RM', 'REGIONES', 'DIGITAL'].forEach(k => {
+        const btn = document.getElementById('tab_' + k);
+        if (btn) {
+          btn.className = (k === tabKey) ? 
+            'px-2.5 py-1 rounded-md bg-pizarra-900 text-white font-bold whitespace-nowrap transition-all shadow-xs' : 
+            'px-2.5 py-1 rounded-md bg-slate-100 hover:bg-slate-200 text-slate-600 whitespace-nowrap transition-all';
+        }
+      });
+      filterClosureCheckboxes();
+    }
+
+    function onClosureToggle(cb) {
+      if (cb.checked) {
+        state.closedStores.add(cb.value);
+      } else {
+        state.closedStores.delete(cb.value);
+      }
+      updateClosureUI();
+      renderAll();
+    }
+
+    function toggleClosure(id) {
+      const cb = document.querySelector(`input[value="${id}"]`);
+      if (cb) {
+        cb.checked = !cb.checked;
+        onClosureToggle(cb);
+      }
+    }
+
+    function toggleGroupClosure(ids) {
+      ids.forEach(id => {
+        const cb = document.querySelector(`input[value="${id}"]`);
+        if (cb) {
+          cb.checked = true;
+          state.closedStores.add(id);
+        }
+      });
+      updateClosureUI();
+      renderAll();
+    }
+
+    function toggleEntireGroup(groupKey) {
+      let targetIds = [];
+      if (groupKey === 'G9') targetIds = DASHBOARD_DATA.g9_ids;
+      else if (groupKey === 'RM') targetIds = DASHBOARD_DATA.rm_ids;
+      else if (groupKey === 'REGIONES') targetIds = DASHBOARD_DATA.regiones_ids;
+      else if (groupKey === 'DIGITAL') targetIds = DASHBOARD_DATA.digital_ids;
+
+      const allClosed = targetIds.every(id => state.closedStores.has(id));
+      
+      targetIds.forEach(id => {
+        const cb = document.querySelector(`input[value="${id}"]`);
+        if (allClosed) {
+          state.closedStores.delete(id);
+          if (cb) cb.checked = false;
+        } else {
+          state.closedStores.add(id);
+          if (cb) cb.checked = true;
+        }
+      });
+
+      updateClosureUI();
+      renderAll();
+    }
+
+    function clearClosures() {
+      state.closedStores.clear();
+      document.querySelectorAll('#closureCheckboxesContainer input').forEach(cb => cb.checked = false);
+      updateClosureUI();
+      renderAll();
+    }
+
+    function updateClosureUI() {
+      const badge = document.getElementById('closedCountBadge');
+      const count = state.closedStores.size;
+      badge.textContent = `${count} cerrada${count === 1 ? '' : 's'}`;
+      
+      if (count > 0) {
+        badge.className = 'px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-100 text-amber-900 border border-amber-300 shadow-xs transition-all';
+      } else {
+        badge.className = 'px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-slate-100 text-slate-600 border border-slate-200 transition-all';
+      }
+
+      // Actualizar estilos de filas de checkboxes
+      document.querySelectorAll('.closure-item').forEach(label => {
+        const cb = label.querySelector('input');
+        if (cb && cb.checked) {
+          label.classList.add('is-closed');
+        } else {
+          label.classList.remove('is-closed');
+        }
+      });
+
+      // Actualizar estado de botones de grupo
+      ['G9', 'RM', 'REGIONES'].forEach(k => {
+        const btn = document.getElementById('btnGrp_' + k);
+        if (!btn) return;
+        let ids = (k === 'G9') ? DASHBOARD_DATA.g9_ids : (k === 'RM' ? DASHBOARD_DATA.rm_ids : DASHBOARD_DATA.regiones_ids);
+        const allClosed = ids.every(id => state.closedStores.has(id));
+        if (allClosed) {
+          btn.className = 'px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-600 text-white border border-amber-700 transition-all';
+          btn.textContent = `✓ ${k} Cerrado`;
+        } else {
+          btn.className = 'px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 transition-all';
+          btn.textContent = `${k === 'RM' ? 'Resto RM' : (k === 'REGIONES' ? 'Regiones' : 'G9')} (${ids.length})`;
+        }
+      });
+    }
+
+    function loadEntityDefaults(id) {
+      const loc = DASHBOARD_DATA.locales[id];
+      state.g1_override = loc.g1_organica_anual_pct;
+      document.getElementById('sliderG1').value = loc.g1_organica_anual_pct;
+      document.getElementById('valG1').textContent = (loc.g1_organica_anual_pct > 0 ? '+' : '') + loc.g1_organica_anual_pct.toFixed(1) + '%';
+    }
+
+    function onEntityChange(newId) {
+      state.currentEntity = newId;
+      loadEntityDefaults(newId);
+      renderAll();
+    }
+
+    function setCurrency(mode) {
+      state.currencyMode = mode;
+      document.getElementById('btnReal').className = mode === 'REAL' ? 'px-3 py-1 rounded-md transition-all active-pill' : 'px-3 py-1 rounded-md transition-all text-slate-600 hover:text-slate-900';
+      document.getElementById('btnNom').className = mode === 'NOMINAL' ? 'px-3 py-1 rounded-md transition-all active-pill' : 'px-3 py-1 rounded-md transition-all text-slate-600 hover:text-slate-900';
+      renderAll();
+    }
+
+    function setTimeMode(mode) {
+      state.timeMode = mode;
+      document.getElementById('btnMensual').className = mode === 'MONTHLY' ? 'px-3 py-1 rounded-md transition-all active-pill' : 'px-3 py-1 rounded-md transition-all text-slate-600 hover:text-slate-900';
+      document.getElementById('btnAnual').className = mode === 'ANNUAL' ? 'px-3 py-1 rounded-md transition-all active-pill' : 'px-3 py-1 rounded-md transition-all text-slate-600 hover:text-slate-900';
+      renderAll();
+    }
+
+    function setSeriesMode(mode) {
+      state.seriesMode = mode;
+      document.getElementById('btnLimpia').className = mode === 'CLEAN' ? 'px-3 py-1 rounded-md transition-all active-pill' : 'px-3 py-1 rounded-md transition-all text-slate-600 hover:text-slate-900';
+      document.getElementById('btnCruda').className = mode === 'RAW' ? 'px-3 py-1 rounded-md transition-all active-pill' : 'px-3 py-1 rounded-md transition-all text-slate-600 hover:text-slate-900';
+      renderAll();
+    }
+
+    function setHipodromo(code) {
+      state.currentHipodromo = code;
+      ['ALL', 'HCH', 'CHS', 'VSC', 'CHC'].forEach(c => {
+        const btn = document.getElementById('hipo_' + c);
+        btn.className = (c === code) ? `px-3 py-1.5 rounded-xl text-xs font-bold border border-transparent transition-all active-hipo-${c} shadow-xs` : 'px-3 py-1.5 rounded-xl text-xs font-bold border border-slate-300 transition-all text-slate-700 hover:bg-slate-100 shadow-xs';
+      });
+      renderAll();
+    }
+
+    function onHuffParamChange() {
+      state.lambda = parseFloat(document.getElementById('sliderLambda').value);
+      state.u0 = parseFloat(document.getElementById('sliderU0').value);
+      document.getElementById('valLambda').textContent = state.lambda.toFixed(1);
+      document.getElementById('valU0').textContent = state.u0.toFixed(4);
+      renderAll();
+    }
+
+    function onDynamicParamChange() {
+      state.g1_override = parseFloat(document.getElementById('sliderG1').value);
+      state.shrinkage = parseFloat(document.getElementById('sliderShrinkage').value) / 100.0;
+      state.phi = parseFloat(document.getElementById('sliderPhi').value);
+      state.levelShockPct = parseFloat(document.getElementById('sliderShock').value) / 100.0;
+      state.inflationRate = parseFloat(document.getElementById('sliderInfl').value) / 100.0;
+
+      document.getElementById('valG1').textContent = (state.g1_override > 0 ? '+' : '') + state.g1_override.toFixed(1) + '%';
+      document.getElementById('valShrinkage').textContent = Math.round(state.shrinkage * 100) + '%';
+      document.getElementById('valPhi').textContent = state.phi.toFixed(2);
+      document.getElementById('valShock').textContent = (state.levelShockPct > 0 ? '+' : '') + Math.round(state.levelShockPct * 100) + '%';
+      document.getElementById('valInfl').textContent = (state.inflationRate * 100).toFixed(1) + '%';
+      
+      renderAll();
+    }
+
+    function restoreCleanG1() {
+      loadEntityDefaults(state.currentEntity);
+      renderAll();
+    }
+
+    function resetAllDefaults() {
+      clearClosures();
+      state.lambda = 4.0;
+      state.u0 = 0.1736;
+      state.shrinkage = 0.50;
+      state.phi = 0.94;
+      state.levelShockPct = 0.0;
+      state.inflationRate = 0.030;
+      
+      document.getElementById('sliderLambda').value = 4.0;
+      document.getElementById('sliderU0').value = 0.1736;
+      document.getElementById('sliderShrinkage').value = 50;
+      document.getElementById('sliderPhi').value = 0.94;
+      document.getElementById('sliderShock').value = 0;
+      document.getElementById('sliderInfl').value = 3.0;
+
+      document.getElementById('valLambda').textContent = '4.0';
+      document.getElementById('valU0').textContent = '0.1736';
+      document.getElementById('valShrinkage').textContent = '50%';
+      document.getElementById('valPhi').textContent = '0.94';
+      document.getElementById('valShock').textContent = '0%';
+      document.getElementById('valInfl').textContent = '3.0%';
+
+      loadEntityDefaults(state.currentEntity);
+      renderAll();
+    }
+
+    // MOTOR COMPUTACIONAL DE GRAVITACION HUFF
+    // P_ij = (A_j * d_ij^-lambda) / (sum(A_k * d_ik^-lambda) + U_0)
+    function computeHuffCapture(targetEntityId) {
+      const loc = DASHBOARD_DATA.locales[targetEntityId];
+      const isConsolidated = (targetEntityId === 'CONSOLIDADO_G9' || targetEntityId === 'CONSOLIDADO_RED');
+      
+      // Sedes receptoras que componen la entidad visualizada
+      let recipientIds = [];
+      if (targetEntityId === 'CONSOLIDADO_G9') {
+        recipientIds = DASHBOARD_DATA.g9_ids;
+      } else if (targetEntityId === 'CONSOLIDADO_RED') {
+        recipientIds = DASHBOARD_DATA.red_ids;
+      } else {
+        recipientIds = [targetEntityId];
+      }
+
+      // Vector de captura por año (2027 a 2031)
+      let captureByYear = [0.0, 0.0, 0.0, 0.0, 0.0];
+      let flowDetails = [];
+      let totalClosedSales = 0.0;
+      let totalDigitalLeak = 0.0;
+
+      // Sedes abiertas en toda la red vigentes para el denominador gravitacional
+      const openRecipients = DASHBOARD_DATA.red_ids.filter(id => !state.closedStores.has(id));
+
+      state.closedStores.forEach(closedId => {
+        const closedLoc = DASHBOARD_DATA.locales[closedId];
+        if (!closedLoc) return;
+
+        // Si la sede actual es la que está cerrada, no captura demanda
+        if (!isConsolidated && closedId === targetEntityId) return;
+
+        // Demanda anual del local cerrado
+        const closedAnnualBase = closedLoc.proy_anual_base.real_p50;
+        const closed5Y = closedLoc.proy_anual_base.total_5y_real;
+        totalClosedSales += closed5Y;
+
+        let denom = state.u0;
+        let scores = {};
+
+        // Cálculo de atractivo y fricción para todas las alternativas abiertas
+        openRecipients.forEach(openId => {
+          const dist = (DASHBOARD_DATA.matriz_distancias[closedId] && DASHBOARD_DATA.matriz_distancias[closedId][openId]) || 5.0;
+          const distEff = Math.max(0.5, dist);
+          const att = Math.max(1.0, DASHBOARD_DATA.locales[openId].venta_base_2026_mm); // atractivo relativo
+          const s = att * Math.pow(distEff, -state.lambda);
+          scores[openId] = s;
+          denom += s;
+        });
+
+        const leakProb = denom > 0 ? (state.u0 / denom) : 1.0;
+        totalDigitalLeak += leakProb * closed5Y;
+
+        if (isConsolidated) {
+          // Consolidado: capturas agregadas sobre todas las receptoras abiertas del portafolio
+          let portfolioProb = 0.0;
+          let topRecId = null;
+          let topRecProb = 0.0;
+
+          recipientIds.forEach(recId => {
+            if (state.closedStores.has(recId)) return; // receptora cerrada no captura
+            if (!scores[recId]) return;
+            const p = denom > 0 ? (scores[recId] / denom) : 0.0;
+            portfolioProb += p;
+            if (p > topRecProb) {
+              topRecProb = p;
+              topRecId = recId;
+            }
+          });
+
+          for (let y = 0; y < 5; y++) {
+            captureByYear[y] += closedAnnualBase[y] * portfolioProb;
+          }
+
+          flowDetails.push({
+            closedId: closedId,
+            closedNombre: closedLoc.nombre,
+            baseSales26: closedLoc.venta_base_2026_mm,
+            probPct: portfolioProb * 100.0,
+            annualClp: (closed5Y / 5.0) * portfolioProb,
+            leakPct: leakProb * 100.0,
+            topRecipient: topRecId ? `${topRecId} (${(topRecProb * 100).toFixed(0)}%)` : 'Ninguna'
+          });
+
+        } else {
+          // Sede individual: flujo exclusivo hacia esta sede
+          if (state.closedStores.has(targetEntityId)) return;
+          const recScore = scores[targetEntityId] || 0.0;
+          const p_ij = denom > 0 ? (recScore / denom) : 0.0;
+          const dist = (DASHBOARD_DATA.matriz_distancias[closedId] && DASHBOARD_DATA.matriz_distancias[closedId][targetEntityId]) || 5.0;
+
+          for (let y = 0; y < 5; y++) {
+            captureByYear[y] += closedAnnualBase[y] * p_ij;
+          }
+
+          flowDetails.push({
+            closedId: closedId,
+            closedNombre: closedLoc.nombre,
+            distKm: dist,
+            probPct: p_ij * 100.0,
+            annualClp: (closed5Y / 5.0) * p_ij,
+            leakPct: leakProb * 100.0
+          });
+        }
+
+      });
+
+      const totalLeakPct = totalClosedSales > 0 ? (totalDigitalLeak / totalClosedSales * 100.0) : 0.0;
+      return { captureByYear, flowDetails, totalLeakPct, totalDigitalLeak };
+    }
+
+    // RENDERIZADO COMPLETO Y REACTIVO
+    function renderAll() {
+      const loc = DASHBOARD_DATA.locales[state.currentEntity];
+      const hipoShare = loc.hipodromo_shares[state.currentHipodromo] || 1.0;
+      const isEntityClosed = state.closedStores.has(state.currentEntity);
+      const isConsolidated = (state.currentEntity === 'CONSOLIDADO_G9' || state.currentEntity === 'CONSOLIDADO_RED');
+
+      // 1. Simulación Huff
+      const huff = computeHuffCapture(state.currentEntity);
+
+      // 2. Factores de deriva orgánica modificada y amortiguada
+      const g1_active = state.g1_override !== null ? state.g1_override : loc.g1_organica_anual_pct;
+      const eff_g1_monthly = (g1_active / 100.0) * state.shrinkage / 12.0;
+
+      // Calcular factor multiplicador anual por drift modificado
+      let customProyAnnualReal = [];
+      let customProyAnnualNom = [];
+
+      // Miembros abiertos de la entidad (si es consolidado)
+      const memberIds = (state.currentEntity === 'CONSOLIDADO_G9') ? DASHBOARD_DATA.g9_ids : (state.currentEntity === 'CONSOLIDADO_RED' ? DASHBOARD_DATA.red_ids : [state.currentEntity]);
+      const openMemberIds = memberIds.filter(id => !state.closedStores.has(id));
+
+      for (let y = 0; y < 5; y++) {
+        // Si el local focal está cerrado individualmente, su venta base cae a 0
+        if (!isConsolidated && isEntityClosed) {
+          customProyAnnualReal.push(0.0);
+          customProyAnnualNom.push(0.0);
+          continue;
+        }
+
+        // Deriva geométrica acumulada a la mitad del año y
+        const monthIndex = y * 12 + 6;
+        let cumDrift = 0.0;
+        for (let m = 1; m <= monthIndex; m++) {
+          cumDrift += Math.pow(state.phi, m / 12.0) * eff_g1_monthly;
+        }
+
+        let baseVal = 0.0;
+        if (isConsolidated) {
+          baseVal = openMemberIds.reduce((sum, id) => sum + DASHBOARD_DATA.locales[id].proy_anual_base.real_p50[y], 0);
+        } else {
+          baseVal = loc.proy_anual_base.real_p50[y];
+        }
+
+        // Aplicar shock y deriva modificada
+        let adjustedReal = baseVal * Math.exp(cumDrift) * (1.0 + state.levelShockPct);
+        let inflComp = Math.pow(1.0 + state.inflationRate, y + 0.5);
+        let adjustedNom = adjustedReal * inflComp;
+
+        customProyAnnualReal.push(adjustedReal);
+        customProyAnnualNom.push(adjustedNom);
+      }
+
+      // Proyección Anual con Captura Huff sumada
+      let totalAnnualReal = [];
+      let totalAnnualNom = [];
+      for (let y = 0; y < 5; y++) {
+        let capReal = huff.captureByYear[y];
+        let inflComp = Math.pow(1.0 + state.inflationRate, y + 0.5);
+        let capNom = capReal * inflComp;
+
+        totalAnnualReal.push(customProyAnnualReal[y] + capReal);
+        totalAnnualNom.push(customProyAnnualNom[y] + capNom);
+      }
+
+      // Aplicar filtros de moneda e hipódromo
+      const isNom = (state.currencyMode === 'NOMINAL');
+      const dispBaseAnual = (isNom ? customProyAnnualNom : customProyAnnualReal).map(v => v * hipoShare);
+      const dispHuffAnual = huff.captureByYear.map((v, i) => v * (isNom ? Math.pow(1.0 + state.inflationRate, i + 0.5) : 1.0) * hipoShare);
+      const dispTotalAnual = (isNom ? totalAnnualNom : totalAnnualReal).map(v => v * hipoShare);
+
+      const sumBase5Y = dispBaseAnual.reduce((a, b) => a + b, 0);
+      const sumHuff5Y = dispHuffAnual.reduce((a, b) => a + b, 0);
+      const sumTotal5Y = dispTotalAnual.reduce((a, b) => a + b, 0);
+
+      // 3. Actualizar KPIs
+      let vtaBase26 = 0.0;
+      if (isConsolidated) {
+        vtaBase26 = openMemberIds.reduce((sum, id) => sum + DASHBOARD_DATA.locales[id].venta_base_2026_mm, 0) * hipoShare;
+      } else {
+        vtaBase26 = (isEntityClosed ? 0.0 : loc.venta_base_2026_mm) * hipoShare;
+      }
+
+      document.getElementById('kpiBase26').textContent = `$${vtaBase26.toFixed(1)} M`;
+      document.getElementById('kpiProyBase').textContent = `$${sumBase5Y.toFixed(1)} M`;
+      document.getElementById('kpiProyProm').textContent = `Prom: $${(sumBase5Y / 5.0).toFixed(1)} M/año`;
+
+      document.getElementById('kpiCapturaHuff').textContent = `+${sumHuff5Y.toFixed(1)} M`;
+      const pctCap = sumBase5Y > 0 ? (sumHuff5Y / sumBase5Y * 100.0) : 0.0;
+      document.getElementById('kpiPctCaptura').textContent = `+${pctCap.toFixed(1)}% sobre base`;
+
+      document.getElementById('kpiTotalProy').textContent = `$${sumTotal5Y.toFixed(1)} M`;
+      const deltaTotal = vtaBase26 > 0 ? ((sumTotal5Y / 5.0 - vtaBase26) / vtaBase26 * 100.0) : 0.0;
+      document.getElementById('kpiDeltaTotal').textContent = `Var. vs 2026: ${deltaTotal > 0 ? '+' : ''}${deltaTotal.toFixed(1)}%`;
+
+      document.getElementById('kpiFugaDigital').textContent = `${huff.totalLeakPct.toFixed(1)}%`;
+      document.getElementById('kpiFugaVol').textContent = `$${huff.totalDigitalLeak.toFixed(1)} M fuera red`;
+
+      // 4. Actualizar Tabla de Flujos Huff
+      const flowThead = document.getElementById('huffFlowTableHead');
+      const flowTbody = document.getElementById('huffFlowTableBody');
+      const flowTitle = document.getElementById('huffFlowTableTitle');
+      const flowSummary = document.getElementById('huffFlowTableSummary');
+
+      if (isConsolidated) {
+        flowTitle.textContent = 'Retención de Cierres por la Cartera:';
+        flowThead.innerHTML = `
+          <tr>
+            <th class="py-1">Cerrada</th>
+            <th class="py-1 text-right">Base '26</th>
+            <th class="py-1 text-right">Retención</th>
+            <th class="py-1 text-right text-gold-700">Captura/año</th>
+          </tr>
+        `;
+      } else {
+        flowTitle.textContent = 'Flujos de Captura hacia Sede:';
+        flowThead.innerHTML = `
+          <tr>
+            <th class="py-1">Cerrada</th>
+            <th class="py-1 text-right">Dist (km)</th>
+            <th class="py-1 text-right">P(ij)</th>
+            <th class="py-1 text-right text-gold-700">Captura/año</th>
+          </tr>
+        `;
+      }
+
+      if (huff.flowDetails.length === 0) {
+        flowTbody.innerHTML = '<tr><td colspan="4" class="py-2.5 text-center text-slate-400">Sin locales cerrados activos.</td></tr>';
+        flowSummary.textContent = '';
+      } else {
+        flowSummary.textContent = `${huff.flowDetails.length} origen(es) activo(s)`;
+        if (isConsolidated) {
+          flowTbody.innerHTML = huff.flowDetails.map(f => `
+            <tr class="hover:bg-slate-50 transition-colors">
+              <td class="py-1 font-bold text-pizarra-900" title="${f.closedNombre}">
+                ${f.closedId}
+                <span class="block text-[10px] text-slate-400 font-normal truncate max-w-[110px]">${f.topRecipient ? 'Top: ' + f.topRecipient : ''}</span>
+              </td>
+              <td class="py-1 text-right text-slate-600">$${f.baseSales26.toFixed(0)}M</td>
+              <td class="py-1 text-right font-bold text-slate-700">${f.probPct.toFixed(1)}%</td>
+              <td class="py-1 text-right font-extrabold text-gold-700">+$${f.annualClp.toFixed(1)}M</td>
+            </tr>
+          `).join('');
+        } else {
+          flowTbody.innerHTML = huff.flowDetails.map(f => `
+            <tr class="hover:bg-slate-50 transition-colors">
+              <td class="py-1 font-bold text-pizarra-900" title="${f.closedNombre}">${f.closedId}</td>
+              <td class="py-1 text-right text-slate-600">${f.distKm.toFixed(1)}</td>
+              <td class="py-1 text-right font-bold text-slate-700">${f.probPct.toFixed(1)}%</td>
+              <td class="py-1 text-right font-extrabold text-gold-700">+$${f.annualClp.toFixed(1)}M</td>
+            </tr>
+          `).join('');
+        }
+      }
+
+      // 5. Actualizar Tabla Anual
+      const annualTbody = document.getElementById('annualTableBody');
+      const anos = [2027, 2028, 2029, 2030, 2031];
+      annualTbody.innerHTML = anos.map((y, i) => `
+        <tr class="hover:bg-slate-50">
+          <td class="py-1 font-bold text-slate-700">${y}</td>
+          <td class="py-1 text-right text-slate-600">$${dispBaseAnual[i].toFixed(1)}M</td>
+          <td class="py-1 text-right font-bold text-gold-700">+$${dispHuffAnual[i].toFixed(1)}M</td>
+          <td class="py-1 text-right font-extrabold text-pizarra-900">$${dispTotalAnual[i].toFixed(1)}M</td>
+        </tr>
+      `).join('');
+      document.getElementById('badgeTotal5Y').textContent = `Total 5Y: $${sumTotal5Y.toFixed(1)} M`;
+
+      // 6. Actualizar Gráficos Chart.js
+      renderMainChart(dispBaseAnual, dispHuffAnual, dispTotalAnual, hipoShare);
+      renderAnnualBarChart(dispBaseAnual, dispHuffAnual, dispTotalAnual, hipoShare);
+    }
+
+    function renderMainChart(dispBaseAnual, dispHuffAnual, dispTotalAnual, hipoShare) {
+      const loc = DASHBOARD_DATA.locales[state.currentEntity];
+      const isNom = (state.currencyMode === 'NOMINAL');
+      const isClean = (state.seriesMode === 'CLEAN');
+      
+      const ctx = document.getElementById('mainDemandChart').getContext('2d');
+      if (mainChartInstance) mainChartInstance.destroy();
+
+      if (state.timeMode === 'MONTHLY') {
+        // Vista Mensual (Histórico 64 meses + Proyección 60 meses)
+        const histLabels = DASHBOARD_DATA.meses_hist;
+        const proyLabels = DASHBOARD_DATA.meses_proy;
+        const allLabels = histLabels.concat(proyLabels);
+
+        // Histórico
+        let histValues = [];
+        if (isNom) {
+          histValues = loc.hist_mensual.nominal;
+        } else {
+          histValues = isClean ? loc.hist_mensual.real_limpia : loc.hist_mensual.real_cruda;
+        }
+        histValues = histValues.map(v => v * hipoShare);
+
+        // Proyección Base Mensual
+        let proyBaseValues = new Array(histLabels.length).fill(null);
+        let proyTotalValues = new Array(histLabels.length).fill(null);
+        let p10Values = new Array(histLabels.length).fill(null);
+        let p90Values = new Array(histLabels.length).fill(null);
+
+        proyLabels.forEach((mStr, idx) => {
+          const y = parseInt(mStr.split('-')[0]);
+          const m = parseInt(mStr.split('-')[1]);
+          const yIdx = y - 2027;
+          const w_m = loc.month_weights[m - 1] || (1.0 / 12.0);
+
+          const baseValM = dispBaseAnual[yIdx] * w_m;
+          const totalValM = dispTotalAnual[yIdx] * w_m;
+
+          proyBaseValues.push(baseValM);
+          proyTotalValues.push(totalValM);
+          p10Values.push(baseValM * 0.88);
+          p90Values.push(baseValM * 1.12);
+        });
+
+        // Conectar último punto histórico con primer punto proyectado
+        if (histValues.length > 0) {
+          proyBaseValues[histLabels.length - 1] = histValues[histValues.length - 1];
+          proyTotalValues[histLabels.length - 1] = histValues[histValues.length - 1];
+          p10Values[histLabels.length - 1] = histValues[histValues.length - 1];
+          p90Values[histLabels.length - 1] = histValues[histValues.length - 1];
+        }
+
+        mainChartInstance = new Chart(ctx, {
+          type: 'line',
+          data: {
+            labels: allLabels,
+            datasets: [
+              {
+                label: isClean ? 'Demanda Histórica Limpia' : 'Demanda Histórica Cruda',
+                data: histValues.concat(new Array(proyLabels.length).fill(null)),
+                borderColor: isClean ? '#15803D' : '#64748B',
+                backgroundColor: 'transparent',
+                borderWidth: 2,
+                pointRadius: 0,
+                tension: 0.15
+              },
+              {
+                label: 'Proyección Base P50',
+                data: proyBaseValues,
+                borderColor: '#166534',
+                borderDash: [5, 4],
+                borderWidth: 2,
+                pointRadius: 0,
+                backgroundColor: 'transparent',
+                tension: 0.15
+              },
+              {
+                label: 'Nueva Demanda Total (Efecto Huff)',
+                data: proyTotalValues,
+                borderColor: '#D97706',
+                backgroundColor: 'transparent',
+                borderWidth: 2.5,
+                pointRadius: 1,
+                pointBackgroundColor: '#D97706',
+                tension: 0.15
+              },
+              {
+                label: 'Banda P90',
+                data: p90Values,
+                borderColor: 'transparent',
+                backgroundColor: 'rgba(34, 197, 94, 0.08)',
+                pointRadius: 0,
+                fill: '+1'
+              },
+              {
+                label: 'Banda P10',
+                data: p10Values,
+                borderColor: 'transparent',
+                backgroundColor: 'transparent',
+                pointRadius: 0,
+                fill: false
+              }
+            ]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            plugins: {
+              legend: { display: false },
+              tooltip: {
+                backgroundColor: '#0F172A',
+                titleFont: { size: 12, weight: 'bold' },
+                bodyFont: { size: 12 },
+                padding: 10,
+                callbacks: {
+                  label: function(c) {
+                    if (c.raw === null) return null;
+                    return `${c.dataset.label}: $${c.raw.toFixed(1)} M`;
+                  }
+                }
+              }
+            },
+            scales: {
+              x: {
+                grid: { display: false },
+                ticks: {
+                  maxTicksLimit: 14,
+                  font: { size: 10, weight: 'bold' },
+                  color: '#64748B'
+                }
+              },
+              y: {
+                grid: { color: '#F1F5F9' },
+                ticks: {
+                  font: { size: 10 },
+                  color: '#64748B',
+                  callback: v => '$' + v.toFixed(0) + 'M'
+                }
+              }
+            }
+          }
+        });
+
+      } else {
+        // Vista Anual (2022–2026 Histórico + 2027–2031 Proyectado)
+        const histAnos = loc.hist_anual.anos;
+        const proyAnos = [2027, 2028, 2029, 2030, 2031];
+        const allAnos = histAnos.concat(proyAnos);
+
+        const histVals = (isNom ? loc.hist_anual.nominal : (isClean ? loc.hist_anual.real_limpia : loc.hist_anual.real_cruda)).map(v => v * hipoShare);
+        const proyBase = new Array(histAnos.length).fill(null).concat(dispBaseAnual);
+        const proyTotal = new Array(histAnos.length).fill(null).concat(dispTotalAnual);
+
+        mainChartInstance = new Chart(ctx, {
+          type: 'line',
+          data: {
+            labels: allAnos,
+            datasets: [
+              {
+                label: 'Histórico Anual',
+                data: histVals.concat(new Array(proyAnos.length).fill(null)),
+                borderColor: '#15803D',
+                backgroundColor: 'rgba(21, 128, 61, 0.1)',
+                borderWidth: 2.5,
+                pointRadius: 4,
+                pointBackgroundColor: '#15803D'
+              },
+              {
+                label: 'Proyección Base P50',
+                data: proyBase,
+                borderColor: '#64748B',
+                borderDash: [5, 4],
+                borderWidth: 2,
+                pointRadius: 4,
+                pointBackgroundColor: '#64748B'
+              },
+              {
+                label: 'Total Post-Cierre (Huff)',
+                data: proyTotal,
+                borderColor: '#D97706',
+                borderWidth: 3,
+                pointRadius: 5,
+                pointBackgroundColor: '#D97706'
+              }
+            ]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: {
+              x: { grid: { display: false } },
+              y: {
+                grid: { color: '#F1F5F9' },
+                ticks: { callback: v => '$' + v.toFixed(0) + 'M' }
+              }
+            }
+          }
+        });
+      }
+    }
+
+    function renderAnnualBarChart(dispBaseAnual, dispHuffAnual, dispTotalAnual, hipoShare) {
+      const ctx = document.getElementById('annualBarChart').getContext('2d');
+      if (annualChartInstance) annualChartInstance.destroy();
+
+      annualChartInstance = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: ['2027', '2028', '2029', '2030', '2031'],
+          datasets: [
+            {
+              label: 'Demanda Base',
+              data: dispBaseAnual,
+              backgroundColor: '#15803D',
+              borderRadius: 4
+            },
+            {
+              label: '+ Captura Huff',
+              data: dispHuffAnual,
+              backgroundColor: '#D97706',
+              borderRadius: 4
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              callbacks: {
+                label: c => `${c.dataset.label}: $${c.raw.toFixed(1)} M`
+              }
+            }
+          },
+          scales: {
+            x: { stacked: true, grid: { display: false } },
+            y: {
+              stacked: true,
+              grid: { color: '#F1F5F9' },
+              ticks: { callback: v => '$' + v.toFixed(0) + 'M' }
+            }
+          }
+        }
+      });
+    }
+  </script>
+
+</body>
+</html>

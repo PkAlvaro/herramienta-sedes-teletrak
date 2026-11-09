@@ -1,0 +1,200 @@
+    /* --- Extensiones de la herramienta de sedes --- */
+    /* Marca: azul de Hipódromo Chile principal (#003058), sedes Teletrak en amarillos (#D99A00), naranja #F15A24 solo para lo urgente, grises #98A0B0 / #C0C8D0 */
+    :root {
+      --color-fondo: #F4F6F9;
+      --color-principal: #003058;
+      --color-principal-hover: #002444;
+      --color-charcoal: #0F1B2D;
+      --color-steel: #556273;
+      --color-blush: #D99A00;
+      --color-blush-soft: #FDF3D1;
+      --color-principal-soft: #E8EEF5;
+    }
+    body { background: #F4F6F9; color: #0F1B2D; }
+    .titulo, .card h2, main h2 { font-family: 'Barlow Semi Condensed', 'Inter', sans-serif; letter-spacing: .005em; }
+
+    /* Cabecera: franja azul con los dos logos, filete de marca y barra de pestañas blanca */
+    header { z-index: 1100 !important; }
+    .franja { background: #003058; color: #fff; }
+    .franja h1 { color: #fff !important; font-family: 'Barlow Semi Condensed', 'Inter', sans-serif; font-size: 1.4rem !important; font-weight: 700 !important; }
+    .franja h1 ~ span { background: rgba(255,255,255,.14) !important; color: #fff !important; border-color: rgba(255,255,255,.32) !important; font-weight: 600 !important; }
+    .franja p, .franja p span { color: rgba(255,255,255,.86) !important; }
+    .franja .bg-slate-100 { background: rgba(255,255,255,.14) !important; border-color: rgba(255,255,255,.28) !important; }
+    .franja .bg-slate-100 button { color: #fff !important; background: transparent !important; }
+    .franja .bg-slate-100 button.active-pill { background: #fff !important; color: #003058 !important; border-color: #fff !important; }
+    .logos { display: flex; align-items: center; gap: 8px; margin-right: 6px; flex-shrink: 0; }
+    .franja h1 { white-space: nowrap; }
+    .logos img { height: 44px; width: auto; background: #fff; border-radius: 10px; padding: 6px 10px; box-sizing: content-box; }
+    .logos img + img { height: 32px; padding: 12px 12px; }
+    .filete { height: 4px; background: linear-gradient(90deg, #003058, #003058 70%, #D99A00 70%, #D99A00 78%, #003058 78%); }
+    .barra-nav { background: #fff; border-bottom: 1px solid #E2E7EE; }
+    .barra-nav nav { margin-top: 0 !important; font-size: 13.5px !important; padding: 4px 0; }
+
+    /* Pestañas principales: subrayado verde */
+    #nav .nav-tab { padding: 10px 12px 8px; border-radius: 0; border: 0; border-bottom: 3px solid transparent; color: #556273; font-weight: 500; background: none; }
+    #nav .nav-tab:hover:not(:disabled) { background: none; color: #0F1B2D; }
+    #nav .nav-tab.on, #nav .nav-tab.on:hover:not(:disabled) { background: none; color: #0F1B2D; font-weight: 700; border-bottom-color: #003058; }
+    /* Selectores de zona y vista: control segmentado */
+    .nav-tab { padding: 6px 12px; border-radius: 9px; color: #3B4757; border: 1px solid transparent; transition: all .15s; }
+    .nav-tab:hover:not(:disabled) { background: #EEF2F7; }
+    .nav-tab.on, .nav-tab.on:hover:not(:disabled) { background: #003058; color: #fff; }
+    .nav-tab:disabled { opacity: .4; cursor: default; }
+    #red-zonas { background: #fff; border: 1px solid #D9DFE7; border-radius: 12px; padding: 3px; gap: 2px !important; }
+
+    .card { background: #FFFFFF; border: 1px solid #E5E7EB; border-radius: 14px; padding: 1.25rem; box-shadow: 0 1px 3px rgba(31,41,55,.05); }
+    .card h2 { font-size: 1.25rem; font-weight: 700; color: #1F2937; margin-bottom: .75rem; }
+    .card h3 { font-size: 11px; font-weight: 700; color: #496276; text-transform: uppercase; letter-spacing: .06em; margin: 1rem 0 .5rem; }
+    .tbl { overflow: auto; border: 1px solid #E5E7EB; border-radius: 12px; }
+    .tbl table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    .tbl th { position: sticky; top: 0; background: #F9FAFB; text-align: left; font-weight: 600; color: #496276; padding: 7px 10px; border-bottom: 1px solid #E5E7EB; white-space: nowrap; cursor: pointer; z-index: 1; }
+    .tbl td { padding: 6px 10px; border-bottom: 1px solid #F3F4F6; white-space: nowrap; color: #1F2937; }
+    .tbl td.n { text-align: right; font-variant-numeric: tabular-nums; }
+    .tbl td.w { white-space: normal; min-width: 220px; }
+    .tbl tr.click { cursor: pointer; }
+    .tbl.compacta th, .tbl.compacta td { padding: 4px 6px; white-space: normal; vertical-align: top; }
+    .tbl tr.click:hover td { background: #E8EEF5; }
+    .chip { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 10.5px; font-weight: 700; white-space: nowrap; border: 1px solid transparent; }
+    .chip.ERROR, .chip.err { background: #FDF3D1; color: #C2410C; border-color: #D99A00; }
+    .chip.AVISO, .chip.warn { background: #FDF3D1; color: #C2410C; border-color: #D99A00; }
+    .chip.ok { background: #E8EEF5; color: #003058; border-color: #D1DCE8; }
+    .chip.info { background: #E8EEF5; color: #003058; border-color: #C2D5E8; }
+    .kpi-mini { background: #FFFFFF; border: 1px solid #E5E7EB; border-radius: 12px; padding: .7rem .9rem; }
+    .kpi-mini .v { font-family: 'Barlow Semi Condensed', 'Inter', sans-serif; font-size: 1.9rem; line-height: 1.05; font-weight: 700; color: #1F2937; font-variant-numeric: tabular-nums; }
+    .kpi-mini .l { font-size: 11.5px; color: #496276; margin-top: 2px; }
+    .fld label { display: block; font-size: 11px; font-weight: 700; color: #496276; text-transform: uppercase; letter-spacing: .04em; margin: .75rem 0 .25rem; }
+    .fld input[type=number], .fld input[type=text], .fld select, .fld textarea { width: 100%; padding: 6px 10px; border: 1px solid #CBD5E1; border-radius: .6rem; font-size: 13px; background: #fff; color: #1F2937; }
+    #acceso select, #acceso input { padding: 3px 6px; font-size: 12px; }
+    .fld input[type=file] { font-size: 12px; color: #556273; max-width: 100%; }
+    .btn-p { background: #003058; color: #fff; font-weight: 700; padding: 9px 18px; border-radius: 10px; font-size: 13px; }
+    .btn-p:hover:not(:disabled) { background: #00742F; }
+    .btn-p:disabled { opacity: .45; }
+    .btn-s { background: #fff; color: #1F2937; font-weight: 600; padding: 6px 12px; border-radius: 10px; font-size: 12px; border: 1px solid #CBD5E1; }
+    .btn-s:hover:not(:disabled) { background: #E8EEF5; color: #003058; border-color: #003058; }
+    .btn-s:disabled { opacity: .4; cursor: default; }
+    #btn-presentar:not(:disabled) { background: #496276; color: #fff; border-color: #496276; }
+    #btn-presentar:not(:disabled):hover { background: #003058; border-color: #003058; }
+    #mapa { height: 600px; border-radius: 12px; border: 1px solid #E5E7EB; position: relative; z-index: 1; isolation: isolate; }
+    .mapa-sticky { position: sticky; top: 6.5rem; align-self: start; }
+    .leyenda { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 11.5px; color: #496276; margin-top: 8px; }
+    .leyenda i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 5px; vertical-align: -1px; }
+    /* Hipódromos: marino oscuro corporativo */
+    .hipo { display: inline-flex; align-items: center; gap: 5px; transform: translate(-11px, -11px); white-space: nowrap; pointer-events: auto; }
+    .hipo b { display: grid; place-items: center; width: 22px; height: 22px; background: #003058; color: #fff; font-size: 8.5px; font-weight: 800; border: 2px solid #fff; border-radius: 4px; transform: rotate(45deg); box-shadow: 0 0 0 1.5px #003058, 0 1px 4px rgba(31,41,55,.3); }
+    .hipo b i { font-style: normal; transform: rotate(-45deg); }
+    .hipo span { font-size: 10.5px; font-weight: 700; color: #003058; background: rgba(255,255,255,.94); padding: 1px 6px; border-radius: 5px; border: 1px solid #CBD5E1; }
+    .tip-ancho { white-space: normal; width: 300px; }
+    .hipo { cursor: pointer; }
+    .hipo-CHS b { background: #00703C; box-shadow: 0 0 0 1.5px #00703C, 0 1px 4px rgba(15,27,45,.4); } .hipo-CHS span { color: #00703C; }   /* Club Hípico de Santiago en su verde */
+    .hipo.off b { background: #fff; color: #98A0B0; border-color: #98A0B0; box-shadow: none; }
+    .hipo.off span { color: #98A0B0; text-decoration: line-through; }
+    .hipo.sel b { outline: 3px solid #F15A24; outline-offset: 2px; }
+    .zoom-lejos .hipo span { display: none; }
+    .leyenda i.hipo-ley { width: 9px; height: 9px; background: #003058; border: 1.5px solid #fff; box-shadow: 0 0 0 1px #003058; border-radius: 2px; transform: rotate(45deg); }
+    .prog { height: 6px; background: #E2E7EE; border-radius: 3px; overflow: hidden; }
+    .prog > div { height: 100%; width: 0; background: #003058; transition: width .2s; }
+    body.presentacion .solo-edicion { display: none !important; }
+    .ficha { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 14px; font-size: 12px; }
+    .ficha dt { color: #556273; font-size: 11px; }
+    .ficha dd { margin: 0 0 6px; font-weight: 600; color: #0F1B2D; font-variant-numeric: tabular-nums; }
+    #ficha.rounded-xl { background: #fff !important; border-color: #E2E7EE !important; border-top: 4px solid #003058 !important; }
+    #ficha h2 { font-size: 1.35rem; }
+    /* Linea de tiempo del mapa */
+    .tl { border: 1px solid #E2E7EE; border-radius: 14px; background: #fff; padding: 12px 16px 8px; }
+    .tl-play { width: 44px; height: 44px; border-radius: 50%; background: #003058; display: grid; place-items: center; flex-shrink: 0; box-shadow: 0 1px 3px rgba(15,27,45,.2); transition: background .15s; }
+    .tl-play:hover { background: #00742F; }
+    .tl-play svg { width: 14px; height: 14px; fill: #fff; }
+    #tiempo-lbl { font-family: 'Barlow Semi Condensed', 'Inter', sans-serif; font-size: 1.5rem; }
+    .tl-chip { display: inline-block; margin-top: 3px; padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; }
+    .tl-chip.real { background: #EEF1F5; color: #3B4757; }
+    .tl-chip.plan { background: #EEF1F5; color: #3B4757; }
+    .tl-pista { position: relative; height: 78px; cursor: pointer; user-select: none; touch-action: none; outline: none; }
+    .tl-pista svg { position: absolute; left: 0; top: 14px; width: 100%; height: 40px; overflow: visible; }
+    .tl-zona { position: absolute; top: -1px; font-size: 11px; font-weight: 600; }
+    .tl-hoy { position: absolute; top: 12px; height: 44px; border-left: 1.5px dashed #496276; }
+    .tl-hoy span { position: absolute; top: -13px; left: 4px; font-size: 11px; font-weight: 600; color: #496276; white-space: nowrap; }
+    .tl-cierre { position: absolute; top: 58px; width: 6px; height: 6px; border-radius: 50%; transform: translateX(-50%); }
+    .tl-cierre.decidido { background: #3B4757; }
+    .tl-cierre.propuesto { background: #fff; border: 1.2px solid #98A0B0; }
+    .tl-cierre.ahora { background: #F15A24; border-color: #F15A24; width: 8px; height: 8px; top: 57px; }
+    .tl-anio { position: absolute; top: 66px; font-size: 10px; color: #667085; transform: translateX(-50%); }
+    .tl-cursor { position: absolute; top: 10px; height: 46px; border-left: 2px solid #0F1B2D; pointer-events: none; }
+    .tl-cursor::before { content: ""; position: absolute; top: -5px; left: -7px; width: 12px; height: 12px; border-radius: 50%; background: #F15A24; border: 2px solid #0F1B2D; }
+    .tl-txt { font-size: 12px; color: #3B4757; margin-top: 2px; padding-left: 60px; min-height: 18px; }
+    .tl-vel { display: block; margin-top: 2px; font-size: 11px; color: #556273; text-decoration: underline dotted; text-underline-offset: 3px; }
+    .tl-vel:hover { color: #003058; }
+    .tl-ano { display: flex; width: 100%; align-items: center; gap: 10px; padding: 4px 6px; border-radius: 8px; font-size: 12px; color: #556273; }
+    .tl-ano:hover { background: #F4F6F9; }
+    .tl-ano.on { color: #0F1B2D; background: #E8EEF5; }
+    .tl-ano .bg-green-800 { background: #003058 !important; }
+    .tl-lista { margin: 2px 0 6px 56px; font-size: 12px; }
+    .tl-lista li { display: flex; justify-content: space-between; gap: 8px; padding: 1px 0; }
+    .tl-lista li a { color: #003058; }
+    .tl-lista li a:hover { text-decoration: underline; }
+    .tl-lista li span { color: #496276; font-size: 11px; white-space: nowrap; }
+    .tl-lista li.hecho a { color: #9CA3AF; }
+    input[type=file]::file-selector-button { font: inherit; font-size: 12px; font-weight: 600; color: #1F2937; background: #fff; border: 1px solid #CBD5E1; border-radius: 10px; padding: 6px 12px; margin-right: 10px; cursor: pointer; }
+    input[type=file]::file-selector-button:hover { background: #E8EEF5; color: #003058; }
+
+    /* Estado de Resultados (P&L) */
+    .pl-section-head { background-color: #F9FAFB; font-weight: 800; color: #1F2937; text-transform: uppercase; font-size: 11px; letter-spacing: 0.05em; border-top: 1px solid #E5E7EB; border-bottom: 1px solid #E5E7EB; }
+    .pl-row-sub { color: #496276; padding-left: 1.5rem !important; }
+    .pl-total-row { font-weight: 700; background-color: #F9FAFB; color: #1F2937; border-top: 1px solid #E5E7EB; border-bottom: 2px solid #496276; }
+    .pl-delta-row { font-weight: 800; background-color: #E8EEF5; color: #003058; border-top: 2px solid #003058; border-bottom: 2px solid #003058; }
+    .pl-delta-row.neg { background-color: #FDF3D1; color: #C2410C; border-color: #D99A00; }
+
+    /* Píldoras activas y estilos de acento */
+    .active-pill { background-color: #003058 !important; color: #FFFFFF !important; border-color: #003058 !important; }
+
+    /* Modal de ajustes e informe */
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 1200;
+      background: rgba(31, 41, 55, 0.45);
+      backdrop-filter: blur(2px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 1.25rem;
+    }
+    .modal-backdrop[hidden], .modal-backdrop.hidden {
+      display: none !important;
+    }
+    .modal-backdrop .modal-card,
+    .modal-backdrop > .card,
+    .modal-card {
+      background: #FFFFFF;
+      border-radius: 16px;
+      border: 1px solid #E5E7EB;
+      box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.15), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+      max-width: 48rem;
+      width: 100%;
+      max-height: calc(100vh - 3.5rem);
+      display: flex;
+      flex-direction: column;
+      overflow-y: auto;
+      scroll-behavior: smooth;
+    }
+    .modal-backdrop .modal-body,
+    .modal-card .modal-body {
+      overflow-y: auto;
+      scroll-behavior: smooth;
+    }
+
+    /* Demanda y VAN: selector de escenario y bloques plegados */
+    .seg-esc { display: inline-flex; border: 1px solid #D9DFE7; border-radius: 11px; padding: 3px; gap: 2px; background: #fff; }
+    .seg-esc button { border: 0; background: none; color: #556273; font-weight: 600; font-size: 13px; padding: 7px 14px; border-radius: 8px; cursor: pointer; }
+    .seg-esc button[aria-pressed="true"] { background: #003058; color: #fff; }
+    details.plegado > summary { list-style: none; }
+    details.plegado > summary::after { content: " · Ver"; font-size: 12px; font-weight: 600; color: #003058; }
+    details.plegado[open] > summary::after { content: " · Ocultar"; }
+
+    /* Simulador de cierres: botones sobrios (sin pasteles), contador como texto */
+    .sim-limpio button:not(#closureGroupTabs button) { background: #fff !important; color: #0F1B2D !important; border: 1px solid #D9DFE7 !important;
+      border-radius: 8px !important; font-weight: 600 !important; font-size: 12px !important; padding: 4px 10px !important; box-shadow: none !important; }
+    .sim-limpio button:not(#closureGroupTabs button):hover { background: #F4F6F9 !important; border-color: #B8C2CF !important; }
+    .sim-limpio #closedCountBadge { background: none !important; border: 0 !important; color: #556273 !important; font-size: 12px !important; font-weight: 600 !important; padding: 0 !important; box-shadow: none !important; }
+    .sim-limpio .text-\[10px\].uppercase, .sim-limpio .uppercase { text-transform: none !important; letter-spacing: 0 !important; }
+    #tab-demanda .sim-limpio button.sim-link { border: 0 !important; background: none !important; color: #003058 !important; padding: 0 !important;
+      font-size: 12px !important; text-decoration: underline; text-underline-offset: 3px; }
+

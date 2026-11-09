@@ -1,0 +1,16 @@
+[project]
+name = "sedes"
+version = "0.1.0"
+description = "Herramienta de analisis de sedes Teletrak"
+requires-python = ">=3.12"
+dependencies = ["numpy", "pandas", "scipy", "statsmodels", "scikit-learn", "openpyxl", "networkx"]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["sedes"]

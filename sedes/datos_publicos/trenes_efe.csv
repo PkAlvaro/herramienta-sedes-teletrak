@@ -1,0 +1,93 @@
+linea,orden,estacion,lat,lon
+Nos,1,Alameda,-33.45228,-70.679001
+Nos,2,Lo Valledor,-33.477212,-70.680708
+Nos,3,Pedro Aguirre Cerda,-33.492728,-70.681847
+Nos,4,Lo Espejo,-33.514544,-70.68596
+Nos,5,Lo Blanco,-33.572694,-70.698351
+Nos,6,Freire,-33.58672,-70.698497
+Nos,7,San Bernardo,-33.594993,-70.697795
+Nos,8,Maestranza,-33.606375,-70.697071
+Nos,9,5 Pinos,-33.62324,-70.700681
+Nos,10,Nos,-33.632242,-70.704661
+Rancagua,1,Alameda,-33.452269,-70.679146
+Rancagua,2,San Bernardo,-33.595005,-70.697945
+Rancagua,3,Buin Zoo,-33.713442,-70.724547
+Rancagua,4,Buin,-33.732363,-70.728456
+Rancagua,5,Linderos,-33.763483,-70.734869
+Rancagua,6,Paine,-33.816031,-70.743628
+Rancagua,7,Hospital,-33.868089,-70.74573
+Rancagua,8,San Francisco,-33.976995,-70.713303
+Rancagua,9,Graneros,-34.065783,-70.725139
+Rancagua,10,Rancagua,-34.171011,-70.753204
+San Fernando,1,Alameda,-33.452269,-70.679146
+San Fernando,2,San Bernardo,-33.595005,-70.697945
+San Fernando,3,Buin Zoo,-33.713442,-70.724547
+San Fernando,4,Buin,-33.732363,-70.728456
+San Fernando,5,Linderos,-33.763483,-70.734869
+San Fernando,6,Paine,-33.816031,-70.743628
+San Fernando,7,Hospital,-33.868089,-70.74573
+San Fernando,8,San Francisco,-33.976995,-70.713303
+San Fernando,9,Graneros,-34.065783,-70.725139
+San Fernando,10,Rancagua,-34.171011,-70.753204
+San Fernando,11,Rengo,-34.407534,-70.867176
+San Fernando,12,San Fernando,-34.589751,-70.982603
+Chillán,1,Alameda,-33.452262,-70.679243
+Chillán,2,San Bernardo,-33.595005,-70.697945
+Chillán,3,Rancagua,-34.171011,-70.753204
+Chillán,4,San Fernando,-34.589751,-70.982603
+Chillán,5,Curicó,-34.984608,-71.24644
+Chillán,6,Molina,-35.102184,-71.302831
+Chillán,7,Talca,-35.429959,-71.649567
+Chillán,8,San Javier,-35.602792,-71.700102
+Chillán,9,Linares,-35.847544,-71.59051
+Chillán,10,Parral,-36.138442,-71.833465
+Chillán,11,San Carlos,-36.42584,-71.966453
+Chillán,12,Chillán,-36.603895,-72.112513
+Biotren L1,1,Mercado,-36.71204,-73.115643
+Biotren L1,2,El Arenal,-36.725818,-73.116205
+Biotren L1,3,Hospital Las Higueras,-36.739634,-73.102563
+Biotren L1,4,Los Cóndores,-36.756675,-73.091684
+Biotren L1,5,Universidad Técnica Federico Santa María,-36.78386,-73.085626
+Biotren L1,6,Lorenzo Arenas,-36.808215,-73.0711
+Biotren L1,7,Concepción,-36.830165,-73.061056
+Biotren L1,8,Chiguayante,-36.915371,-73.028877
+Biotren L1,9,Pedro Medina,-36.925733,-73.021445
+Biotren L1,10,Manquimávida,-36.938603,-73.011317
+Biotren L1,11,La Leonera,-36.951239,-73.013173
+Biotren L1,12,Hualqui,-36.980532,-72.941036
+Biotren L2,1,Concepción,-36.830213,-73.06118
+Biotren L2,2,Juan Pablo II,-36.838417,-73.09782
+Biotren L2,3,Diagonal Bío Bío,-36.837382,-73.118043
+Biotren L2,4,Alborada,-36.846865,-73.130959
+Biotren L2,5,Costa Mar,-36.854813,-73.13287
+Biotren L2,6,El Parque,-36.867819,-73.13601
+Biotren L2,7,Lomas Coloradas,-36.882548,-73.139567
+Biotren L2,8,Cardenal Raúl Silva Henríquez,-36.898111,-73.143312
+Biotren L2,9,Hito Galvarino,-36.953787,-73.156755
+Biotren L2,10,Los Canelos,-36.980185,-73.162857
+Biotren L2,11,Huinca,-36.988219,-73.163179
+Biotren L2,12,Cristo Redentor,-36.998411,-73.162816
+Biotren L2,13,Laguna Quiñenco,-37.012706,-73.158114
+Biotren L2,14,Coronel,-37.024577,-73.150813
+Laja,1,Mercado,-36.71204,-73.115643
+Laja,2,El Arenal,-36.725818,-73.116205
+Laja,3,Hospital Las Higueras,-36.739634,-73.102563
+Laja,4,Los Cóndores,-36.756675,-73.091684
+Laja,5,Universidad Técnica Federico Santa María,-36.78386,-73.085626
+Laja,6,Lorenzo Arenas,-36.808215,-73.0711
+Laja,7,Concepción,-36.830165,-73.061056
+Laja,8,Chiguayante,-36.915371,-73.028877
+Laja,9,Pedro Medina,-36.925733,-73.021445
+Laja,10,Manquimávida,-36.938603,-73.011317
+Laja,11,La Leonera,-36.951239,-73.013173
+Laja,12,Hualqui,-36.980532,-72.941036
+Laja,13,Quilacoya,-37.054517,-72.963334
+Laja,14,San Miguel,-37.078846,-72.958196
+Laja,15,Unihue,-37.119086,-72.942724
+Laja,16,Valle Chanco,-37.137318,-72.933715
+Laja,17,Los Acacios,-37.155922,-72.916743
+Laja,18,Talcamávida,-37.165007,-72.906816
+Laja,19,Gomero,-37.196353,-72.835236
+Laja,20,Buenuraqui,-37.202721,-72.770542
+Laja,21,San Rosendo,-37.263861,-72.727549
+Laja,22,Laja,-37.281962,-72.716739

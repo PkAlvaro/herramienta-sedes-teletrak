@@ -1,0 +1,157 @@
+    <!-- CALIBRACIÓN COLAPSADA AL FINAL -->
+    <details class="card text-xs text-slate-600">
+      <summary class="cursor-pointer font-bold text-[#003058] flex items-center justify-between">
+        <span>Ver respaldo histórico de migración de clientes en cierres pasados</span>
+      </summary>
+      <div class="pt-3 border-t border-slate-100 mt-2">
+        <div id="calibracion"></div>
+      </div>
+    </details>
+
+    <!-- IDs ocultos requeridos para compatibilidad interna -->
+    <div class="hidden">
+      <span id="res-badge-cierres-count">0 cerrados</span>
+      <input type="text" id="resBuscarLocal">
+      <div id="resListaLocales"></div>
+      <span id="kpiBase26">$0.0 M</span>
+      <span id="kpiBaseSub"></span>
+      <span id="kpiProyLabel"></span>
+      <span id="kpiProyBase">$0.0 M</span>
+      <span id="kpiProyProm"></span>
+      <span id="kpiCapturaHuff">+$0.0 M</span>
+      <span id="kpiPctCaptura"></span>
+      <span id="kpiTotalProy">$0.0 M</span>
+      <span id="kpiDeltaTotal"></span>
+      <span id="kpiFugaDigital">0.0%</span>
+      <span id="kpiFugaVol"></span>
+    </div>
+
+    <!-- MODAL DE AJUSTES AVANZADOS HOLT-WINTERS Y MIGRACIÓN -->
+    <div id="modal-ajustes-hw" class="modal-backdrop fixed inset-0 z-[1200] bg-slate-900/50 flex items-center justify-center p-4 hidden" hidden>
+      <div class="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden">
+        <!-- Cabecera del modal -->
+        <div class="px-6 py-4 border-b border-slate-200 flex items-center justify-between bg-slate-50">
+          <div>
+            <h2 class="!mb-0 text-base font-extrabold text-pizarra-900">Ajustes Avanzados de Modelo (Holt-Winters y Migración)</h2>
+            <p class="text-xs text-slate-500 mt-0.5">Sede focal: <span id="hwModalSedeNombre" class="font-semibold text-pizarra-900">Cartera Focal G9</span></p>
+          </div>
+          <button type="button" class="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer" onclick="cerrarModalAjustesHW()" title="Cerrar">
+            <svg class="w-5 h-5 fill-none stroke-current" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+          </button>
+        </div>
+
+        <!-- Cuerpo con scroll -->
+        <div class="p-6 overflow-y-auto custom-scroll flex-1 space-y-5">
+          <!-- Selector de Modo de Calibración -->
+          <div class="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-2">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-bold text-pizarra-900 uppercase tracking-wider">Modo de Calibración:</span>
+              <div class="bg-white p-0.5 rounded-lg flex items-center text-xs font-semibold border border-slate-200">
+                <button type="button" id="btnHwModoAuto" onclick="setModoHW('auto')" class="px-3 py-1 rounded-md transition-all active-pill">Automática (Recomendado)</button>
+                <button type="button" id="btnHwModoManual" onclick="setModoHW('manual')" class="px-3 py-1 rounded-md transition-all text-slate-600 hover:text-slate-900">Manual / Sensibilidad</button>
+              </div>
+            </div>
+            <p class="text-[11px] text-slate-500">
+              En modo automático utiliza los parámetros óptimos calibrados por sede (minimización SSE/WAPE en Python); en modo manual permite forzar overrides globales para análisis de sensibilidad.
+            </p>
+          </div>
+
+          <!-- Parámetros Holt-Winters -->
+          <div id="hwParamsContainer" class="border border-slate-200 rounded-xl p-4 space-y-4">
+            <div class="flex items-center justify-between border-b border-slate-100 pb-2">
+              <h3 class="text-xs font-bold text-pizarra-900 uppercase tracking-wider">Parámetros Holt-Winters</h3>
+            </div>
+
+            <!-- alpha (Nivel) -->
+            <div class="space-y-1.5">
+              <div class="flex items-center justify-between text-xs font-semibold text-slate-600">
+                <span class="flex items-center gap-1.5">
+                  <span>Nivel (α):</span>
+                  <span id="refHwAlpha" class="text-[10px] text-slate-400">Base sede: 0.35</span>
+                </span>
+                <span class="font-extrabold text-pizarra-900" id="valHwAlpha">0.35</span>
+              </div>
+              <div class="flex items-center gap-3">
+                <input type="range" min="0.01" max="1.00" step="0.01" value="0.35" id="sliderHwAlpha" oninput="onHwModalInput('alpha', this.value)" class="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-[#003058]">
+                <input type="number" min="0.01" max="1.00" step="0.01" value="0.35" id="numHwAlpha" onchange="onHwModalInput('alpha', this.value)" class="w-16 px-1.5 py-0.5 text-xs font-bold border border-slate-200 rounded text-right">
+              </div>
+            </div>
+
+            <!-- beta (Tendencia) -->
+            <div class="space-y-1.5 pt-2 border-t border-slate-100">
+              <div class="flex items-center justify-between text-xs font-semibold text-slate-600">
+                <span class="flex items-center gap-1.5">
+                  <span>Tendencia (β):</span>
+                  <span id="refHwBeta" class="text-[10px] text-slate-400">Base sede: 0.12</span>
+                </span>
+                <div class="flex items-center gap-2">
+                  <select id="selHwTrendMode" onchange="onHwModalInput('trendMode', this.value)" class="text-[11px] font-bold bg-white border border-slate-200 rounded px-1.5 py-0.5">
+                    <option value="active">Tendencia activa</option>
+                    <option value="none">Sin tendencia (β = 0)</option>
+                  </select>
+                  <span class="font-extrabold text-pizarra-900" id="valHwBeta">0.12</span>
+                </div>
+              </div>
+              <div class="flex items-center gap-3">
+                <input type="range" min="0.00" max="1.00" step="0.01" value="0.12" id="sliderHwBeta" oninput="onHwModalInput('beta', this.value)" class="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-[#003058]">
+                <input type="number" min="0.00" max="1.00" step="0.01" value="0.12" id="numHwBeta" onchange="onHwModalInput('beta', this.value)" class="w-16 px-1.5 py-0.5 text-xs font-bold border border-slate-200 rounded text-right">
+              </div>
+            </div>
+
+            <!-- gamma (Estacionalidad) -->
+            <div class="space-y-1.5 pt-2 border-t border-slate-100">
+              <div class="flex items-center justify-between text-xs font-semibold text-slate-600">
+                <span class="flex items-center gap-1.5">
+                  <span>Estacionalidad (γ):</span>
+                  <span id="refHwGamma" class="text-[10px] text-slate-400">Base sede: 0.25</span>
+                </span>
+                <span class="font-extrabold text-pizarra-900" id="valHwGamma">0.25</span>
+              </div>
+              <div class="flex items-center gap-3">
+                <input type="range" min="0.00" max="1.00" step="0.01" value="0.25" id="sliderHwGamma" oninput="onHwModalInput('gamma', this.value)" class="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-[#003058]">
+                <input type="number" min="0.00" max="1.00" step="0.01" value="0.25" id="numHwGamma" onchange="onHwModalInput('gamma', this.value)" class="w-16 px-1.5 py-0.5 text-xs font-bold border border-slate-200 rounded text-right">
+              </div>
+              <div class="p-2.5 rounded-lg bg-amber-50/50 border border-amber-200 text-[11px] text-amber-900">
+                Nota técnica: La agregación anual neutraliza el impacto estacional (γ) sobre el flujo anual y el VAN, modulando únicamente la amplitud estacional dentro de los 12 meses de cada año.
+              </div>
+            </div>
+          </div>
+
+          <!-- Parámetros Estructurales de Huff (Opcional para expertos) -->
+          <div class="border border-slate-200 rounded-xl p-4 space-y-3">
+            <div class="flex items-center justify-between border-b border-slate-100 pb-2">
+              <h3 class="text-xs font-bold text-pizarra-900 uppercase tracking-wider">Parámetros Estructurales de Huff (Opcional para expertos)</h3>
+            </div>
+            <div class="space-y-1.5">
+              <div class="flex items-center justify-between text-xs font-semibold text-slate-600">
+                <span>Sensibilidad a la Distancia (λ):</span>
+                <span class="font-extrabold text-pizarra-900" id="valHwLambda">4.0</span>
+              </div>
+              <input type="range" min="1.0" max="6.0" step="0.1" value="4.0" id="sliderHwLambda" oninput="onHwModalInput('lambda', this.value)" class="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-[#003058]">
+            </div>
+            <div class="space-y-1.5 pt-2 border-t border-slate-100">
+              <div class="flex items-center justify-between text-xs font-semibold text-slate-600">
+                <span>Fuga Fuera de Red (U₀):</span>
+                <span class="font-extrabold text-pizarra-900" id="valHwU0">0.1736</span>
+              </div>
+              <input type="range" min="0.00" max="0.80" step="0.01" value="0.1736" id="sliderHwU0" oninput="onHwModalInput('u0', this.value)" class="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-[#003058]">
+            </div>
+          </div>
+        </div>
+
+        <!-- Pie del modal -->
+        <div class="px-6 py-3.5 border-t border-slate-200 flex items-center justify-between bg-slate-50">
+          <button type="button" onclick="restaurarCalibracionOptimaHW()" class="px-3 py-1.5 rounded-lg text-xs font-bold text-slate-600 hover:text-slate-800 hover:bg-slate-200 transition-all cursor-pointer">
+            Restaurar Calibración Óptima
+          </button>
+          <div class="flex items-center gap-2">
+            <button type="button" onclick="cerrarModalAjustesHW()" class="px-3.5 py-1.5 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-200 transition-all cursor-pointer">
+              Cancelar
+            </button>
+            <button type="button" onclick="aplicarAjustesHW()" class="px-4 py-1.5 rounded-lg text-xs font-bold bg-[#003058] hover:bg-[#002444] text-white shadow-2xs transition-all cursor-pointer">
+              Aplicar Ajustes
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>

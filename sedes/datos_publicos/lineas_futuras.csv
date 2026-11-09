@@ -1,0 +1,70 @@
+linea,orden,estacion,lat,lon,apertura,estado,fuente
+7,1,Brasil,-33.40073,-70.74609,2028-12,En obras,Metro (oct 2026): fines de 2028
+7,2,José Miguel Infante,-33.406,-70.74552,2028-12,En obras,Metro (oct 2026): fines de 2028
+7,3,Salvador Gutiérrez,-33.41741,-70.74745,2028-12,En obras,Metro (oct 2026): fines de 2028
+7,4,Huelén,-33.42279,-70.74047,2028-12,En obras,Metro (oct 2026): fines de 2028
+7,5,Cerro Navia,-33.42556,-70.71891,2028-12,En obras,Metro (oct 2026): fines de 2028
+7,6,Radal,-33.42848,-70.70393,2028-12,En obras,Metro (oct 2026): fines de 2028
+7,7,General Velásquez,-33.43114,-70.69331,2028-12,En obras,Metro (oct 2026): fines de 2028
+7,8,Matucana,-33.43298,-70.68138,2028-12,En obras,Metro (oct 2026): fines de 2028
+7,9,Parque de los Reyes,-33.43208,-70.66838,2028-12,En obras,Metro (oct 2026): fines de 2028
+7,10,Puente Cal y Canto,-33.43321,-70.6512,2028-12,En obras,Metro (oct 2026): fines de 2028
+7,11,Baquedano,-33.43672,-70.63477,2028-12,En obras,Metro (oct 2026): fines de 2028
+7,12,Pedro de Valdivia,-33.42468,-70.61379,2028-12,En obras,Metro (oct 2026): fines de 2028
+7,13,Isidora Goyanechea,-33.41382,-70.60486,2028-12,En obras,Metro (oct 2026): fines de 2028
+7,14,Vitacura,-33.40616,-70.59856,2028-12,En obras,Metro (oct 2026): fines de 2028
+7,15,Américo Vespucio,-33.40364,-70.5873,2028-12,En obras,Metro (oct 2026): fines de 2028
+7,16,Parque Araucano,-33.4025,-70.57416,2028-12,En obras,Metro (oct 2026): fines de 2028
+7,17,Gerónimo de Alderete,-33.39445,-70.56148,2028-12,En obras,Metro (oct 2026): fines de 2028
+7,18,Padre Hurtado,-33.38954,-70.54783,2028-12,En obras,Metro (oct 2026): fines de 2028
+7,19,Estoril,-33.38306,-70.5332,2028-12,En obras,Metro (oct 2026): fines de 2028
+Melipilla,1,Lo Errázuriz,-33.49019,-70.72223,2028-06,En obras,EFE (sep 2026): desde 2028 conectando en Lo Errázuriz; tramo soterrado a Alameda postergado
+Melipilla,2,Américo Vespucio,-33.50095,-70.73578,2028-06,En obras,EFE (sep 2026): desde 2028 conectando en Lo Errázuriz; tramo soterrado a Alameda postergado
+Melipilla,3,Tres Poniente,-33.53675,-70.77117,2028-06,En obras,EFE (sep 2026): desde 2028 conectando en Lo Errázuriz; tramo soterrado a Alameda postergado
+Melipilla,4,Ciudad Satélite,-33.55392,-70.79623,2028-06,En obras,EFE (sep 2026): desde 2028 conectando en Lo Errázuriz; tramo soterrado a Alameda postergado
+Melipilla,5,Padre Hurtado,-33.5678,-70.81568,2028-06,En obras,EFE (sep 2026): desde 2028 conectando en Lo Errázuriz; tramo soterrado a Alameda postergado
+Melipilla,6,Malloco,-33.60793,-70.85841,2028-06,En obras,EFE (sep 2026): desde 2028 conectando en Lo Errázuriz; tramo soterrado a Alameda postergado
+Melipilla,7,Talagante,-33.65925,-70.92727,2028-06,En obras,EFE (sep 2026): desde 2028 conectando en Lo Errázuriz; tramo soterrado a Alameda postergado
+Melipilla,8,El Monte,-33.67929,-70.98969,2028-06,En obras,EFE (sep 2026): desde 2028 conectando en Lo Errázuriz; tramo soterrado a Alameda postergado
+Melipilla,9,Melipilla,-33.67968,-71.21099,2028-06,En obras,EFE (sep 2026): desde 2028 conectando en Lo Errázuriz; tramo soterrado a Alameda postergado
+Batuco,1,Batuco,-33.24077,-70.81345,2029-12,En obras,EFE: tramo Batuco-Quilicura fines de 2029
+Batuco,2,Colina,-33.28965,-70.77065,2029-12,En obras,EFE: tramo Batuco-Quilicura fines de 2029
+Batuco,3,Valle Grande,-33.32345,-70.74105,2029-12,En obras,EFE: tramo Batuco-Quilicura fines de 2029
+Batuco,4,Las Industrias,-33.33906,-70.72737,2029-12,En obras,EFE: tramo Batuco-Quilicura fines de 2029
+Batuco,5,Quilicura,-33.36495,-70.70465,2029-12,En obras,EFE: tramo Batuco-Quilicura fines de 2029
+Batuco,6,Renca,-33.40204,-70.6901,2031-12,En licitación,"EFE: tramo soterrado en licitación, completo 2031 (riesgo de postergación)"
+Batuco,7,Matucana,-33.43301,-70.68057,2031-12,En licitación,"EFE: tramo soterrado en licitación, completo 2031 (riesgo de postergación)"
+Batuco,8,Quinta Normal,-33.44031,-70.67996,2031-12,En licitación,"EFE: tramo soterrado en licitación, completo 2031 (riesgo de postergación)"
+9,1,Puente Cal y Canto,-33.43195,-70.65117,2032-12,Proyectada,Metro: tramo norte 2032
+9,2,Santa Lucía,-33.44345,-70.64603,2032-12,Proyectada,Metro: tramo norte 2032
+9,3,Matta,-33.45748,-70.64336,2032-12,Proyectada,Metro: tramo norte 2032
+9,4,Ñuble Poniente,-33.46929,-70.64223,2032-12,Proyectada,Metro: tramo norte 2032
+9,5,Bío-Bío,-33.47693,-70.64189,2030-12,Proyectada,Metro: primer tramo 2030
+9,6,La Legua,-33.48766,-70.64082,2030-12,Proyectada,Metro: primer tramo 2030
+9,7,Salvador Allende,-33.49507,-70.63982,2030-12,Proyectada,Metro: primer tramo 2030
+9,8,Berlioz,-33.50781,-70.63841,2030-12,Proyectada,Metro: primer tramo 2030
+9,9,La Castrina,-33.51895,-70.63662,2030-12,Proyectada,Metro: primer tramo 2030
+9,10,Fernández Albano,-33.52926,-70.63538,2030-12,Proyectada,Metro: primer tramo 2030
+9,11,Santa Rosa,-33.54304,-70.63409,2030-12,Proyectada,Metro: primer tramo 2030
+9,12,Hospital Padre Hurtado,-33.55405,-70.63191,2030-12,Proyectada,Metro: primer tramo 2030
+9,13,Antumapu,-33.56619,-70.63033,2030-12,Proyectada,Metro: primer tramo 2030
+9,14,Plaza de La Pintana,-33.58359,-70.62885,2030-12,Proyectada,Metro: primer tramo 2030
+9,15,El Castillo,-33.59572,-70.62746,2033-12,Proyectada,Metro: tramo sur 2033
+9,16,Eyzaguirre,-33.61828,-70.62726,2033-12,Proyectada,Metro: tramo sur 2033
+9,17,Bajos de Mena,-33.62114,-70.6127,2033-12,Proyectada,Metro: tramo sur 2033
+9,18,Ejército Libertador,-33.61877,-70.59126,2033-12,Proyectada,Metro: tramo sur 2033
+9,19,Plaza de Puente Alto,-33.6095,-70.57505,2033-12,Proyectada,Metro: tramo sur 2033
+8,1,El Peral,-33.56828,-70.55509,2032-12,Aprobada (SEA),Metro: tramo sur 2032
+8,2,Diego Portales,-33.55938,-70.55849,2032-12,Aprobada (SEA),Metro: tramo sur 2032
+8,3,Trinidad Oriente,-33.54728,-70.56833,2032-12,Aprobada (SEA),Metro: tramo sur 2032
+8,4,La Florida Alto,-33.53558,-70.57343,2032-12,Aprobada (SEA),Metro: tramo sur 2032
+8,5,Walker Martínez,-33.52315,-70.57849,2032-12,Aprobada (SEA),Metro: tramo sur 2032
+8,6,Macul,-33.50895,-70.58919,2032-12,Aprobada (SEA),Metro: tramo sur 2032
+8,7,Juan Pinto Durán,-33.49859,-70.5968,2032-12,Aprobada (SEA),Metro: tramo sur 2032
+8,8,Punta de Rieles,-33.48533,-70.59938,2032-12,Aprobada (SEA),Metro: tramo sur 2032
+8,9,Zañartu,-33.47381,-70.59876,2032-12,Aprobada (SEA),Metro: tramo sur 2032
+8,10,Juan Gómez Millas,-33.46431,-70.59828,2032-12,Aprobada (SEA),Metro: tramo sur 2032
+8,11,Chile España,-33.45719,-70.59791,2032-12,Aprobada (SEA),Metro: tramo sur 2032
+8,12,Campus Oriente,-33.44476,-70.59916,2033-12,Aprobada (SEA),Metro: tramo norte 2033
+8,13,Eliodoro Yáñez,-33.43019,-70.60269,2033-12,Aprobada (SEA),Metro: tramo norte 2033
+8,14,Los Leones,-33.42086,-70.60553,2033-12,Aprobada (SEA),Metro: tramo norte 2033
