@@ -154,6 +154,30 @@ function opcionesMesSim(actual) {
   return out.sort((a, b) => a - b);
 }
 
+// Retencion de un cierre del escenario de Demanda y VAN con el mismo modelo del plan: Huff Top-3 con tope de capacidad
+// (acumulado en el orden de los cierres) entre las sedes abiertas en su fecha, y canal digital segun el Censo de la comuna.
+// La usan la tabla de flujos y el detalle de migracion, para que EBITDA, VAN y fichas salgan del mismo calculo.
+function mesEscenario(id) {
+  const k = APP._calMemo?.cal?.[id], m = getStoreClosureMonth(id);
+  if (k && mesSimulacion(k.mes) === m) return k.mes;
+  return sumarMeses(`${(DASHBOARD_DATA.anos_proy || [2027])[0]}-01`, m - 1);
+}
+function retencionPlan(id) {
+  if (typeof state === "undefined" || !state?.closedStores?.has(id) || !APP.est || !APP._porId) return null;
+  calendarioCierres();
+  const cerr = [...state.closedStores], clave = JSON.stringify([APP._calMemo.clave, cerr.map((c) => [c, getStoreClosureMonth(c)])]);
+  if (APP._retEsc?.clave !== clave || APP._retEsc.est !== APP.est) {
+    const calSim = Object.fromEntries(cerr.map((c) => [c, { mes: mesEscenario(c) }]));
+    APP._retEsc = { clave, est: APP.est, calSim, libro: libroCapacidad(calSim), m: {} };
+  }
+  const R = APP._retEsc;
+  if (R.m[id] !== undefined) return R.m[id];
+  const s = APP._porId[id], loc = DASHBOARD_DATA.locales[id];
+  if (!s || !loc) return (R.m[id] = null);
+  const t = R.calSim[id].mes, rec = conUso(DASHBOARD_DATA.huff_ids.filter((j) => j !== id && !(R.calSim[j] && R.calSim[j].mes <= t)), id, t, R.libro);
+  const B = baseCierre(s, rec, sumarMeses(historia().corte, 1), new Set()), fis = B.e.physProb;
+  return (R.m[id] = { mes: t, fis, dig: (1 - fis) * B.md, absorcion: B.e.absorcion || {}, arrMM: B.arrMM, costoMM: (B.e.costoCierreCLP || 0) / 1e6 });
+}
 function getStoreClosureMonth(id) {
   if (typeof state === 'undefined' || !state) return 1;
   if (!state.closureMonths) state.closureMonths = {};
@@ -406,6 +430,9 @@ function pedirPython(msg) {
 // Solo se envia la direccion. Nominatim pide maximo 1 consulta por segundo.
 // =====================================================================
 const NOMINATIM = "https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=cl&q=";
+// Coordenadas fijas por Id_Division (ui/coordenadas_fijas.json, solo en el repo privado): las de la corrida que respalda el
+// informe, para que todos los navegadores den los mismos numeros. null = la sede quedo sin ubicar. Lo que no esta se busca.
+const COORDS_FIJAS = /*__COORDS__*/{};
 const esperar = (ms) => new Promise((r) => setTimeout(r, ms));
 async function buscarDireccion(q) {
   const r = await fetch(NOMINATIM + encodeURIComponent(q), { headers: { "Accept-Language": "es" } });
@@ -422,8 +449,9 @@ async function ubicarSedes(dirs) {
     if (APP.saltarMapa) break;
     const dir = String(d.direccion || "").trim();
     const clave = norm(dir + "|" + (d.zona || ""));
-    let g = await IDB.get(clave, "geo");
-    if (!g && !falloRed && !APP.saltarMapa) {
+    const fija = Object.hasOwn(COORDS_FIJAS, d.sede_id);
+    let g = fija ? COORDS_FIJAS[d.sede_id] : await IDB.get(clave, "geo");
+    if (!g && !fija && !falloRed && !APP.saltarMapa) {
       const porNombre = d.tipo === "nombre";   // sedes sin direccion (p. ej. cerradas): se busca el nombre del local
       const intentos = [[`${dir}, Chile`, porNombre ? "POR NOMBRE" : null]];
       if (/^SANTIAGO/i.test(d.zona || "")) intentos.push([`${dir}, Santiago, Chile`, porNombre ? "POR NOMBRE" : null]);
@@ -601,6 +629,7 @@ function abrirEstado(est, agregar = true) {
   iniciarDashboard();
   document.querySelectorAll("#nav .nav-tab").forEach((b) => (b.disabled = false));
   if ($("btn-guardar")) $("btn-guardar").disabled = false;
+  if ($("btn-excel")) $("btn-excel").disabled = false;
   if ($("btn-presentar")) $("btn-presentar").disabled = false;
   const sel = $("sel-estado");
   if (sel) {
@@ -627,7 +656,171 @@ async function guardarEstado() {
 }
 function presentar(on) {
   document.body.classList.toggle("presentacion", on);
-  $("btn-presentar").textContent = on ? "Salir de presentación" : "Presentar";
+  $("btn-presentar").textContent = on ? "Salir" : "Presentar";
+  if (on && !document.fullscreenElement) document.documentElement.requestFullscreen?.().catch(() => {});
+  if (!on && document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
+  if (on) { llenarPresSede(); if (!PRES_TABS.includes(APP.tab)) { irA("segmentos"); return; } }
+  irA(APP.tab || "segmentos");
+  setTimeout(() => window.dispatchEvent(new Event("resize")), 300);   // el mapa ajusta su tamano
+}
+document.addEventListener("fullscreenchange", () => { if (!document.fullscreenElement && document.body.classList.contains("presentacion")) presentar(false); });
+// Sede que se muestra en la presentacion: la elegida en la barra o con un clic en el cruce
+function llenarPresSede() {
+  if (!APP.est || APP._presSede) return;
+  APP._presSede = filasEstrategia(calcularPortafolioMCDA()).find((x) => x.grupo === "CERRAR")?.id;
+}
+const presTxtEstado = (x) => (x.grupo === "CERRAR" ? `Cierra ${nombreMes(x.mes)}` : x.grupo === "DECIDIDO" ? `Cierre decidido ${nombreMes(x.mes)}` : x.grupo === "FORTALECER" ? "En seguimiento" : "Red mínima");
+const presColEstado = (x) => (x.grupo === "CERRAR" ? "#C2410C" : x.grupo === "DECIDIDO" ? "#1F2937" : "#496276");
+// Presentacion de Estrategia: tarjetas por grupo, el cruce de las dos condiciones y la tabla de las sedes elegidas (por
+// tarjeta o por casilla) con su VAN, sus escenarios y los criterios del score
+function pintarEstPres() {
+  const cont = $("est-pres"); if (!cont) return;
+  const F = filasEstrategia(calcularPortafolioMCDA()), pm = probMin(), de = (g) => F.filter((x) => x.grupo === g), suma = (l) => l.reduce((a, x) => a + (x.van || 0), 0);
+  const ev = F.filter((x) => x.grupo !== "DECIDIDO" && x.grupo !== "FUERA");
+  const crea = (x) => x.van > 0 && x.prob != null && x.prob >= pm, poco = (x) => CATEGORIAS_SALIDA.has(x.pf.categoria);
+  const sel = APP._presFiltro || { k: "g:CERRAR" };
+  const GR = { CERRAR: ["Cierran por el plan", "#C2410C"], DECIDIDO: ["Cierran por decisión de la gerencia", "#1F2937"], FORTALECER: ["No cierran, en seguimiento", "#7C2D12"], TRANSFORMAR: ["No cierran, red mínima", "#496276"] };
+  const tarjeta = (g, sub) => { const [t, col] = GR[g], on = sel.k === `g:${g}`;
+    return `<button type="button" data-f="g:${g}" class="pres-caja" style="cursor:pointer;text-align:left;font:inherit;border:${on ? `3px solid ${col}` : "2px solid transparent"};border-left:8px solid ${col};padding:22px 28px;display:flex;align-items:center;justify-content:space-between;gap:16px;min-height:96px">
+      <span><span style="display:block;font-size:20px;font-weight:700;color:${col}">${t}</span><span style="display:block;font-size:17px;color:#5B6B7D;margin-top:6px">${sub}</span></span>
+      <span class="pres-cifra" style="font-size:72px;color:${col}">${de(g).length}</span></button>`; };
+  const tarjetas = tarjeta("CERRAR", `VAN ${mmM(suma(de("CERRAR")))}`) + tarjeta("DECIDIDO", `VAN ${mmM(suma(de("DECIDIDO")))}`)
+    + tarjeta("FORTALECER", "se revisan cada año") + tarjeta("TRANSFORMAR", "cerrarlas no conviene");
+  const celda = (v, p) => {
+    const l = ev.filter((x) => crea(x) === v && poco(x) === p), ci = l.filter((x) => x.grupo === "CERRAR").length, k = `c:${v ? 1 : 0}${p ? 1 : 0}`, on = sel.k === k, d = v && p;
+    const lbl = d ? "cierran" : ci ? `${ci} cierra${ci === 1 ? "" : "n"}, ${l.length - ci} no` : v ? "seguimiento" : p ? "red mínima" : "se mantienen";
+    return `<button type="button" data-f="${k}" class="pres-caja" style="cursor:pointer;font:inherit;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;${d ? "background:#FFF4ED;" : ""}border:${on ? "3px solid #003058" : d ? "2px solid #C2410C" : "2px solid #E2E7EE"}">
+      <span class="pres-cifra" style="font-size:clamp(56px,9vh,104px);color:${d ? "#C2410C" : "#003058"}">${l.length}</span><span style="font-size:19px;font-weight:600;color:${d ? "#C2410C" : "#3D4C5E"}">${lbl}</span></button>`;
+  };
+  // Sedes de la tabla segun lo elegido
+  let filas, titulo;
+  if (sel.k.startsWith("g:")) { const g = sel.k.slice(2); filas = de(g); titulo = GR[g][0]; }
+  else { const v = sel.k[2] === "1", p = sel.k[3] === "1"; filas = ev.filter((x) => crea(x) === v && poco(x) === p); titulo = `${v ? "Cerrar crea valor" : "Cerrar no crea valor"} y ${p ? "rinde poco" : "rinde bien"}`; }
+  filas = [...filas].sort((a, b) => (a.grupo === "CERRAR" || a.grupo === "DECIDIDO") && (b.grupo === "CERRAR" || b.grupo === "DECIDIDO") ? (a.mes < b.mes ? -1 : 1) : (b.van ?? -1e9) - (a.van ?? -1e9));
+  const barra = (v) => `<span style="display:inline-flex;align-items:center;gap:8px"><span style="display:inline-block;width:44px;height:8px;border-radius:4px;background:#E2E7EE"><span style="display:block;height:8px;border-radius:4px;background:#003058;width:${Math.max(4, v)}%"></span></span><span style="width:26px;text-align:right">${Math.round(v)}</span></span>`;
+  // Por que no cierra: lo que falla de las dos condiciones (asi un VAN positivo no se lee como un cierre pendiente)
+  const motivo = (x) => x.van == null || x.van <= 0 ? "Cerrarla resta valor"
+    : x.prob == null || x.prob < pm ? `Crea valor solo en ${x.prob != null ? fmt.num(x.prob * 100, 0) : "-"}% de los escenarios`
+    : !poco(x) ? "Rinde bien frente a la red" : "No cumple la regla";
+  const estado = (x) => x.grupo === "CERRAR" ? `<span style="color:#C2410C;font-weight:700">Cierra</span>` : x.grupo === "DECIDIDO" ? `<span style="color:#1F2937;font-weight:700">Cierra</span>` : `<span style="color:#7C2D12;font-weight:600">${motivo(x)}</span>`;
+  const cierran = filas.every((x) => x.grupo === "CERRAR" || x.grupo === "DECIDIDO"), ninguna = filas.every((x) => x.grupo !== "CERRAR" && x.grupo !== "DECIDIDO");
+  const mesDe = (x) => x.mes || mantieneDe(x.id)?.mes || null;
+  const p = APP.pesosScore || { vol: 0.35, efic: 0.40, tend: 0.25 }, pc = (v) => Math.round(v * 100);
+  const th = (t2, al = "right") => `<th style="text-align:${al};font-weight:600;padding:10px 12px;white-space:nowrap">${t2}</th>`;
+  const tabla = `<table class="pres-tabla" style="width:100%;border-collapse:collapse;font-size:17px;font-variant-numeric:tabular-nums">
+    <thead style="position:sticky;top:0;background:#fff;color:#5B6B7D;font-size:16px"><tr style="border-bottom:2px solid #E2E7EE">${th("Sede", "left")}${th(ninguna ? "Por qué no cierra" : cierran ? "" : "Situación", "left")}${th(ninguna ? "Mejor fecha" : "Fecha", "left")}${th(ninguna ? "VAN si se cerrara" : "VAN del cierre")}${th("Crea valor en")}${th(`Volumen ${pc(p.vol)}%`, "left")}${th(`Arriendo ${pc(p.efic)}%`, "left")}${th(`Tendencia ${pc(p.tend)}%`, "left")}${th("Score")}${th("Frente a la red", "left")}</tr></thead>
+    <tbody>${filas.map((x) => `<tr style="border-bottom:1px solid #EEF2F6">
+      <td style="padding:9px 12px;font-weight:700;color:#0F1B2D;white-space:nowrap">${esc(nombreLindo(x.nombre))}</td>
+      <td style="padding:9px 12px;white-space:nowrap">${estado(x)}</td>
+      <td style="padding:9px 12px;color:${x.mes ? "#3D4C5E" : "#8A97A6"};white-space:nowrap">${mesDe(x) ? nombreMes(mesDe(x)) : "-"}</td>
+      <td style="padding:9px 12px;text-align:right;font-weight:${ninguna ? 500 : 700};color:${x.van < 0 ? "#B42318" : ninguna ? "#5B6B7D" : "#0F1B2D"}">${x.van != null ? mmM(x.van) : "-"}</td>
+      <td style="padding:9px 12px;text-align:right;color:${x.prob != null && x.prob < pm ? "#C2410C" : "#0F1B2D"}">${x.prob != null ? `${fmt.num(x.prob * 100, 0)}%` : "-"}</td>
+      <td style="padding:10px 14px">${barra(x.pf.pctVol)}</td><td style="padding:10px 14px">${barra(x.pf.pctEfic)}</td><td style="padding:10px 14px">${barra(x.pf.pctTend)}</td>
+      <td style="padding:9px 12px;text-align:right;font-weight:700">${x.pf.scoreBase != null ? fmt.num(x.pf.scoreBase, 0) : "-"}</td>
+      <td style="padding:9px 12px;white-space:nowrap;font-weight:600;color:${poco(x) ? "#C2410C" : "#3D4C5E"}">${poco(x) ? "Rinde poco" : "Rinde bien"}</td></tr>`).join("")}</tbody>
+    ${filas.length > 1 && cierran ? `<tfoot><tr style="border-top:2px solid #E2E7EE"><td colspan="3" style="padding:10px 14px;font-weight:700">Total ${filas.length} sedes</td><td style="padding:9px 12px;text-align:right;font-weight:800;color:${suma(filas) < 0 ? "#B42318" : "#0F1B2D"}">${mmM(suma(filas))}</td><td colspan="6"></td></tr></tfoot>` : ""}</table>`;
+  const fila = (t2) => `<div style="font-size:18px;font-weight:600;color:#3D4C5E;align-self:center;line-height:1.25">${t2}</div>`;
+  const rotulo = (t2) => `<div style="font-size:15px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#5B6B7D">${t2}</div>`;
+  cont.innerHTML = `<div style="display:flex;flex-direction:column;gap:22px;height:calc(100vh - 190px);padding-top:4px">
+    <div style="display:flex;flex-direction:column;gap:12px">${rotulo("Grupos del plan")}
+      <div class="pres-tarjetas" style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:20px">${tarjetas}</div></div>
+    <div class="pres-grid" style="flex-grow:1;display:grid;grid-template-columns:440px minmax(0,1fr);gap:24px;min-height:0">
+      <div class="pres-caja" style="border:none;padding:28px 30px;display:flex;flex-direction:column;gap:18px">
+        ${rotulo("La regla")}
+        <div style="font-size:19px;color:#0F1B2D;line-height:1.35">Cierra si cerrarla crea valor y además rinde poco frente a la red</div>
+        <div class="pres-cruce" style="flex-grow:1;display:grid;grid-template-columns:96px repeat(2,minmax(0,1fr));grid-template-rows:auto repeat(2,minmax(0,1fr));gap:14px">
+          <div></div><div style="font-size:17px;font-weight:600;color:#3D4C5E">Rinde poco</div><div style="font-size:17px;font-weight:600;color:#3D4C5E">Rinde bien</div>
+          ${fila("Crea valor")}${celda(true, true)}${celda(true, false)}${fila("No crea valor")}${celda(false, true)}${celda(false, false)}</div></div>
+      <div class="pres-caja" style="border:none;padding:24px 26px;display:flex;flex-direction:column;gap:12px;min-height:0">
+        ${rotulo("Sedes")}
+        <div class="pres-cifra" style="font-size:32px;font-weight:700;color:#003058">${titulo}</div>
+        <div style="overflow:auto;min-height:0">${tabla}</div></div></div></div>`;
+  cont.querySelectorAll("[data-f]").forEach((b) => (b.onclick = () => { APP._presFiltro = { k: b.dataset.f }; pintarEstPres(); }));
+}
+// Presentacion del mapa: las sedes que van cerrando hasta el mes de la linea de tiempo, por grupo de la estrategia
+function pintarRedPres() {
+  const cont = $("red-pres"); if (!cont || !APP.est) return;
+  const m = APP.mesLinea || sumarMeses(historia().corte, 1), G = gruposPlan(), nom = (id) => esc(nombreLindo(APP._porId?.[id]?.nombre ?? id));
+  const grupo = (t, lista, col) => {
+    const ya = lista.filter(([, k]) => k.mes <= m).sort((a, b) => (a[1].mes < b[1].mes ? -1 : 1));
+    return `<div style="display:flex;flex-direction:column;gap:6px">
+      <div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px"><span style="font-size:14px;font-weight:700;color:${col}">${t}</span>
+        <span class="pres-cifra" style="font-size:28px;color:${col};white-space:nowrap">${ya.length}<span style="font-size:16px;color:#8A97A6"> de ${lista.length}</span></span></div>
+      ${ya.length ? `<div style="display:flex;flex-direction:column;gap:3px">${ya.map(([id, k]) => `<div style="display:flex;justify-content:space-between;gap:8px;font-size:13px">
+        <span style="display:flex;align-items:center;gap:8px;font-weight:600;color:#0F1B2D"><span style="width:8px;height:8px;border-radius:50%;background:${col};flex-shrink:0"></span>${nom(id)}</span>
+        <span style="color:#5B6B7D;white-space:nowrap">${nombreMes(k.mes)}</span></div>`).join("")}</div>` : `<div style="font-size:13px;color:#8A97A6">Aún ninguna</div>`}</div>`;
+  };
+  cont.innerHTML = `<div style="display:flex;flex-direction:column;gap:14px">
+    ${grupo("Por decisión de la gerencia", G.decididos, "#1F2937")}
+    <div style="height:1px;background:#E2E7EE"></div>
+    ${grupo("Por el plan", G.plan, "#C2410C")}</div>`;
+}
+// Presentacion de Simulacion VAN: los escenarios de Monte Carlo del plan, del plan con decididos o de una sede
+function pintarSimPres() {
+  const cont = $("sim-pres"); if (!cont) return;
+  if (!SIM.sedeSimMap?.size) simCorrerMotor();
+  const alc = APP._presSimAlc || "plan", R = SIM.resultadosMC || [];
+  let ev, titulo, r = null;
+  if (alc === "sede") { r = SIM.sedeSimMap.get(APP._presSede) || R.find((x) => x.clasificacion_sim === "PROPUESTO"); APP._presSede = r?.sede_id; ev = r ? [r] : []; titulo = r ? nombreLindo(r.nombre) : ""; }
+  else { ev = R.filter((x) => x.clasificacion_sim === "PROPUESTO" || (alc === "todos" && x.clasificacion_sim === "DECIDIDO")); titulo = alc === "todos" ? "Plan con decididos" : "Cierres del plan"; }
+  const c = simCalcularCarteraConjunta(ev), pm = probMin(), M = (v) => mmM(v / 1e6);
+  const chip = (k, t2) => `<button type="button" data-alc="${k}" style="font:inherit;font-size:18px;font-weight:700;padding:10px 20px;border-radius:999px;cursor:pointer;border:2px solid ${alc === k ? "#003058" : "#D5DCE5"};background:${alc === k ? "#003058" : "#fff"};color:${alc === k ? "#fff" : "#3D4C5E"}">${t2}</button>`;
+  const ops = [...SIM.sedeSimMap.values()].sort((a, b) => nombreLindo(a.nombre).localeCompare(nombreLindo(b.nombre)))
+    .map((y) => `<option value="${esc(y.sede_id)}" ${y.sede_id === APP._presSede ? "selected" : ""}>${esc(nombreLindo(y.nombre))}</option>`).join("");
+  const pe = c.probExito ?? 0, peTxt = pe > 0.995 && pe < 1 ? `${fmt.num(pe * 100, 1)}%` : `${fmt.num(pe * 100, 0)}%`;
+  const cifra = (t2, v, col = "#003058", sub = "", chico = false) => `<div style="display:flex;flex-direction:column;gap:4px"><span style="font-size:17px;color:#5B6B7D">${t2}</span>
+    <span class="pres-cifra" style="font-size:${chico ? "clamp(32px,4.5vh,48px)" : "clamp(44px,6.5vh,72px)"};color:${col}">${v}</span>${sub ? `<span style="font-size:16px;color:#5B6B7D">${sub}</span>` : ""}</div>`;
+  // Que mueve el VAN (solo una sede): VAN promedio del 20% de escenarios con cada supuesto bajo frente al 20% alto
+  let motores = "";
+  if (r) {
+    const P = sorteosSede(r._B), vec = r.vectorDeltaVan.map((v) => v / 1e6), N = vec.length, q = Math.max(1, Math.floor(N * 0.2));
+    const mot = MOTORES_SIM.map(([key, nom]) => {
+      const v = P.map((p) => (key === "eps" ? p.eps.reduce((a, b) => a + b, 0) / p.eps.length : p[key])), idx = v.map((_, i) => i).sort((a, b) => v[a] - v[b]);
+      const prom = (l) => l.reduce((a, i) => a + vec[i], 0) / l.length;
+      return { nom, bajo: prom(idx.slice(0, q)), alto: prom(idx.slice(N - q)) };
+    }).sort((a, b) => Math.abs(b.alto - b.bajo) - Math.abs(a.alto - a.bajo)).slice(0, 3);
+    const lim = Math.max(1, ...mot.flatMap((m) => [Math.abs(m.bajo), Math.abs(m.alto)])), pos = (v) => 50 + (v / lim) * 50;
+    motores = `<div style="display:flex;flex-direction:column;gap:16px;border-top:1px solid #E2E7EE;padding-top:20px">
+      <span style="font-size:17px;font-weight:700;color:#003058">Qué mueve su VAN</span>
+      ${mot.map((m) => { const a = Math.min(pos(m.bajo), pos(m.alto)), b = Math.max(pos(m.bajo), pos(m.alto));
+        return `<div style="display:flex;flex-direction:column;gap:6px"><span style="font-size:16px;font-weight:600">${m.nom}</span>
+          <div style="position:relative;height:18px"><div style="position:absolute;left:50%;top:-3px;bottom:-3px;width:2px;background:#C7D0DB"></div>
+          <div style="position:absolute;top:3px;height:12px;border-radius:4px;background:#003058;left:${a}%;width:${Math.max(0.5, b - a)}%"></div></div></div>`; }).join("")}
+      <div style="display:flex;justify-content:space-between;font-size:14px;color:#5B6B7D"><span>destruye valor</span><span>crea valor</span></div></div>`;
+  }
+  cont.innerHTML = `<div style="display:flex;flex-direction:column;gap:20px;height:calc(100vh - 190px)">
+    <div style="display:flex;flex-wrap:wrap;align-items:center;gap:12px">${chip("plan", "Cierres del plan")}${chip("todos", "Plan con decididos")}${chip("sede", "Una sede")}
+      ${alc === "sede" ? `<select id="sim-pres-sede" aria-label="Sede" style="font:inherit;font-size:18px;font-weight:700;color:#003058;padding:9px 14px;border-radius:12px;border:2px solid #003058;background:#fff">${ops}</select>` : ""}
+      <span style="margin-left:auto;font-size:16px;color:#5B6B7D">${fmt.num(SIM.iteraciones, 0)} escenarios de Monte Carlo</span></div>
+    <div class="pres-grid" style="flex-grow:1;display:grid;grid-template-columns:minmax(0,1fr) 420px;gap:24px;min-height:0">
+      <div class="pres-caja" style="border:none;padding:28px 32px;display:flex;flex-direction:column;gap:12px;min-height:0">
+        <div style="display:flex;align-items:baseline;justify-content:space-between;gap:16px"><span class="pres-cifra" style="font-size:36px;font-weight:700;color:#003058">${esc(titulo)}</span>
+          <span style="display:flex;gap:20px;font-size:15px;color:#5B6B7D"><span style="display:flex;align-items:center;gap:6px"><span style="width:14px;height:14px;border-radius:3px;background:#003058"></span>VAN positivo</span><span style="display:flex;align-items:center;gap:6px"><span style="width:14px;height:14px;border-radius:3px;background:#E34948"></span>VAN negativo</span></span></div>
+        <div style="position:relative;flex-grow:1;min-height:260px"><canvas id="chartSimPres"></canvas></div></div>
+      <div class="pres-caja" style="border:none;padding:30px 34px;display:flex;flex-direction:column;gap:22px;overflow:auto">
+        ${cifra("Escenarios que crean valor", peTxt, pe >= pm ? "#003058" : "#C2410C", `mínimo ${fmt.num(pm * 100, 0)}% para cerrar`)}
+        ${cifra("VAN más probable", M(c.y_conj_p50 ?? 0), (c.y_conj_p50 ?? 0) < 0 ? "#B42318" : "#003058", `caso base ${M(c.van_base ?? 0)}`)}
+        ${cifra("8 de cada 10 escenarios entre", `${M(c.y_conj_p10 ?? 0)} y ${M(c.y_conj_p90 ?? 0)}`, "#0F1B2D", "", true)}
+        ${motores}</div></div></div>`;
+  cont.querySelectorAll("[data-alc]").forEach((b) => (b.onclick = () => { APP._presSimAlc = b.dataset.alc; pintarSimPres(); }));
+  if ($("sim-pres-sede")) $("sim-pres-sede").onchange = (e) => { APP._presSede = e.target.value; pintarSimPres(); };
+  // Histograma de los escenarios, con el caso base y la mediana marcados
+  APP.chartSimPres?.destroy(); APP.chartSimPres = null;
+  const v = Array.from(c.vectorConjunto || []).map((x) => x / 1e6);
+  if (!v.length || !c.n_sedes) return;
+  const lo = Math.min(...v), hi = Math.max(...v), nb = 40, w = (hi - lo) / nb || 1, cnt = new Array(nb).fill(0);
+  for (const x of v) cnt[Math.min(nb - 1, Math.floor((x - lo) / w))]++;
+  const cen = cnt.map((_, k) => lo + (k + 0.5) * w), idx = (x) => Math.max(0, Math.min(nb - 1, Math.floor((x - lo) / w)));
+  const marcas = [{ i: idx(c.van_base / 1e6), t: "Caso base", col: "#C2410C" }, { i: idx(c.y_conj_p50 / 1e6), t: "Mediana", col: "#003058" }];
+  const lineas = { id: "marcas", afterDatasetsDraw(ch) {
+    const { ctx, chartArea: A, scales: { x } } = ch;
+    marcas.forEach((m2, j) => { const px = x.getPixelForValue(m2.i); ctx.save(); ctx.strokeStyle = m2.col; ctx.lineWidth = 3; ctx.setLineDash(j ? [] : [8, 6]);
+      ctx.beginPath(); ctx.moveTo(px, A.top + 44); ctx.lineTo(px, A.bottom); ctx.stroke(); ctx.setLineDash([]); ctx.fillStyle = m2.col; ctx.font = "600 15px Inter, sans-serif";
+      ctx.textAlign = j ? "left" : "right"; ctx.fillText(m2.t, px + (j ? 8 : -8), A.top + 14 + j * 22); ctx.restore(); }); } };
+  APP.chartSimPres = new Chart($("chartSimPres"), { type: "bar", plugins: [lineas],
+    data: { labels: cen.map((x) => mmM(x)), datasets: [{ data: cnt, backgroundColor: cen.map((x) => (x < 0 ? "rgba(227,73,72,0.85)" : "rgba(0,48,88,0.85)")), borderRadius: 3, barPercentage: 0.94, categoryPercentage: 1 }] },
+    options: { responsive: true, maintainAspectRatio: false, animation: false, plugins: { legend: { display: false }, tooltip: { callbacks: { title: (it) => `VAN cerca de ${it[0].label}`, label: (it) => `${it.parsed.y} escenarios` } } },
+      scales: { x: { grid: { display: false }, ticks: { maxTicksLimit: 7, maxRotation: 0, font: { size: 14 } } }, y: { grid: { color: "#E5E9EF" }, ticks: { font: { size: 13 } }, title: { display: true, text: "escenarios", font: { size: 14 } } } } } });
 }
 
 // =====================================================================
@@ -664,6 +857,128 @@ function irA(tab) {
   if (tab === "simulacion") {
     pintarSimulacion();
   }
+  if (document.body.classList.contains("presentacion")) {
+    if (tab === "demanda") pintarDemPres();
+    if (tab === "sensibilidad") pintarSensPres();
+    if (tab === "flexibilidad") pintarFlexPres();
+  }
+}
+const PRES_TABS = ["red", "segmentos", "demanda", "simulacion", "sensibilidad", "flexibilidad"];
+// Contenedor de la vista de presentacion de una pestana (se crea la primera vez)
+function contPres(tab, id) {
+  let c = $(id);
+  if (!c) { c = document.createElement("div"); c.id = id; c.className = "pres-only"; $("tab-" + tab)?.prepend(c); }
+  return c;
+}
+const presRotulo = (t2) => `<div style="font-size:15px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#5B6B7D">${t2}</div>`;
+const presCifra = (t2, v, col = "#003058", sub = "", tam = "clamp(48px,7vh,80px)") => `<div style="display:flex;flex-direction:column;gap:4px"><span style="font-size:17px;color:#5B6B7D">${t2}</span>
+  <span class="pres-cifra" style="font-size:${tam};color:${col}">${v}</span>${sub ? `<span style="font-size:16px;color:#5B6B7D">${sub}</span>` : ""}</div>`;
+const presMarco = (izq, der) => `<div class="pres-grid" style="display:grid;grid-template-columns:minmax(0,1fr) 440px;gap:24px;height:calc(100vh - 190px);padding-top:4px">
+  <div class="pres-caja" style="border:none;padding:30px 34px;display:flex;flex-direction:column;gap:14px;min-height:0">${izq}</div>
+  <div class="pres-caja" style="border:none;padding:32px 36px;display:flex;flex-direction:column;gap:28px">${der}</div></div>`;
+// Demanda y VAN: el modelo de demanda (venta de la red con y sin cierres) y, aparte, el calculo del VAN del plan por ano
+function pintarDemPres() {
+  const cont = contPres("demanda", "dem-pres"), vista = APP._demPresVista || "demanda";
+  const P = flujosPlanMes(), n = P.meses.length, tx = P.tx, anos = [...new Set(P.meses.map((m) => m.slice(0, 4)))];
+  const chip = (k, t2) => `<button type="button" data-dem-vista="${k}" style="font:inherit;font-size:18px;font-weight:700;padding:10px 20px;border-radius:999px;cursor:pointer;border:2px solid ${vista === k ? "#003058" : "#D5DCE5"};background:${vista === k ? "#003058" : "#fff"};color:${vista === k ? "#fff" : "#3D4C5E"}">${t2}</button>`;
+  const mig = APP.migracion === "conservadora" ? "conservadora" : "modelo", R = cmpMigracion();
+  const chipM = (k, t2) => `<button type="button" data-dem-mig="${k}" style="font:inherit;font-size:16px;font-weight:600;padding:8px 16px;border-radius:999px;cursor:pointer;border:2px solid ${mig === k ? "#3A6A96" : "#D5DCE5"};background:${mig === k ? "#E8F0F8" : "#fff"};color:${mig === k ? "#003058" : "#5B6B7D"}">${t2}</button>`;
+  const chips = `<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">${chip("demanda", "Modelo de demanda")}${chip("van", "Cálculo del VAN")}
+    <span style="margin-left:auto;display:flex;gap:8px">${chipM("modelo", "Migración del modelo")}${chipM("conservadora", "Supuesto HCH")}</span></div>`;
+  if (mig === "conservadora" && !R) setTimeout(() => { try { compararMigracion(); } catch (err) { console.error(err); } if (document.body.classList.contains("presentacion")) pintarDemPres(); }, 30);
+  const vsM = (k, fmtv) => (R ? `Modelo ${fmtv(R.modelo[k])}` : "");
+  const ii = (a) => P.meses.map((m, i) => i).filter((i) => P.meses[i].startsWith(a));
+  const s = (arr, I) => I.reduce((t, i) => t + arr[i], 0), sd = (arr, I) => I.reduce((t, i) => t + arr[i] * P.d[i], 0);
+  if (vista === "demanda") {
+    const X = sumarFlujos([P.por.decidido, P.por.propuesto], n), ac = anos.filter((a) => ii(a).length === 12);
+    const red = ac.map((a) => s(P.red, ii(a))), con = ac.map((a) => s(P.red, ii(a)) - s(X.pierde, ii(a)));
+    const vc = s(X.cierran, P.meses.map((_, i) => i)) || 1, tot = (arr) => arr.reduce((a, b) => a + b, 0);
+    const pc = (x) => `${fmt.num(x * 100, 0)}%`;
+    cont.innerHTML = presMarco(`${presRotulo("Modelo de demanda")}${chips}<div class="pres-cifra" style="font-size:32px;font-weight:700;color:#003058">Venta de la red al año</div>
+        <div style="position:relative;flex-grow:1;min-height:260px"><canvas id="chartDemPres"></canvas></div>`,
+      `${presCifra("Si una sede cierra, su venta", pc(tot(X.otras) / vc), "#003058", `va a otras sedes${R ? `, supuesto ${pc(MIGRACION_CONSERVADORA.fisica)} en promedio de la red. ${vsM("otras", pc)}` : ""}`)}${presCifra("", pc(tot(X.online) / vc), "#3A6A96", `va online${R ? `. ${vsM("online", pc)}` : ""}`)}
+       ${presCifra("", pc(tot(X.pierde) / vc), "#C2410C", `se pierde${R ? `. ${vsM("pierde", pc)}` : ""}`)}`);
+    APP.chartDemPres?.destroy();
+    APP.chartDemPres = new Chart($("chartDemPres"), { type: "line", data: { labels: ac, datasets: [
+        { label: "Sin cierres", data: red, borderColor: "#9AA8B8", borderDash: [6, 5], borderWidth: 3, pointRadius: 0, fill: false },
+        { label: "Con el plan", data: con, borderColor: "#003058", borderWidth: 4, pointRadius: 4, pointBackgroundColor: "#003058", fill: false }] },
+      options: { responsive: true, maintainAspectRatio: false, animation: false, plugins: { legend: { position: "bottom", labels: { font: { size: 16 }, boxWidth: 24 } },
+        tooltip: { callbacks: { label: (it) => `${it.dataset.label}: $${fmt.num(it.raw, 0)} M` } } },
+        scales: { x: { grid: { display: false }, ticks: { font: { size: 15 } } }, y: { grid: { color: "#E5E9EF" }, ticks: { callback: (v) => `$${fmt.num(v / 1000, 0)} mil M`, font: { size: 14 } } } } } });
+  } else {
+    const X = P.por.propuesto, desde = APP._demPresDesde || anos.find((a) => ii(a).length === 12) || anos[0], hasta = APP._demPresHasta || anos[anos.length - 1];
+    const sel = anos.filter((a) => a >= desde && a <= hasta), todos = sel.flatMap(ii), conVT = hasta === anos[anos.length - 1];
+    const antes = (I, f) => f(X.gas, I) - f(X.com, I) + f(X.recF, I) + f(X.recD, I) - f(X.costo, I);
+    const vtA = X.vt.gas - X.vt.com + X.vt.recF + X.vt.recD, vt = (1 - tx) * vtA;
+    const desp = (I) => (1 - tx) * antes(I, s) + s(X.ct, I), vp = (I) => (1 - tx) * antes(I, sd) + sd(X.ct, I);
+    const filas = [["Flujo antes de impuesto", (I) => antes(I, s)], [`Impuesto ${fmt.num(tx * 100, 0)}%`, (I) => -tx * antes(I, s)], ["Flujo después de impuesto", desp],
+      ["Factor de descuento", null], ["Valor presente", vp]];
+    const cel = (v, d = 0) => (Math.abs(v) < 0.05 ? "-" : `${v < 0 ? "-" : ""}${fmt.num(Math.abs(v), d)}`);
+    const td = (v, b = "") => `<td style="padding:10px 12px;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;${b}">${v}</td>`;
+    let h = `<table style="width:100%;border-collapse:collapse;font-size:clamp(14px,1.6vh,19px)"><thead><tr style="color:#5B6B7D;border-bottom:2px solid #D5DCE5">
+      <th style="text-align:left;padding:10px 12px 10px 0;font-weight:600">Millones de pesos</th>${sel.map((a) => `<th style="text-align:right;padding:10px 12px;font-weight:600">${a}</th>`).join("")}
+      <th style="text-align:right;padding:10px 12px;font-weight:700">Total</th>${conVT ? `<th style="text-align:right;padding:10px 12px;font-weight:700">Valor terminal</th>` : ""}</tr></thead><tbody>`;
+    for (const [lbl, f] of filas) {
+      const ult = lbl === "Valor presente", est = ult ? "font-weight:800;color:#003058;background:#F4F6F9;" : lbl.startsWith("Factor") ? "color:#5B6B7D;" : "";
+      const celdas = f ? sel.map((a) => td(cel(f(ii(a))))) : sel.map((a) => { const x = desp(ii(a)); return td(Math.abs(x) < 1e-6 ? "-" : fmt.num(vp(ii(a)) / x, 3)); });
+      const total = f ? td(cel(sel.reduce((t, a) => t + f(ii(a)), 0)), "font-weight:700") : td("");
+      const tv = conVT ? (f ? td(cel(lbl.startsWith("Impuesto") ? -tx * vtA : lbl.startsWith("Flujo antes") ? vtA : vt), "font-weight:700") : td("")) : "";
+      h += `<tr style="border-bottom:1px solid #E5E9EF;${est}"><td style="padding:10px 12px 10px 0;white-space:nowrap">${lbl}</td>${celdas.join("")}${total}${tv}</tr>`;
+    }
+    const opA = (v) => anos.map((a) => `<option value="${a}" ${a === v ? "selected" : ""}>${a}</option>`).join("");
+    const selSt = "font:inherit;font-size:17px;padding:6px 10px;border:2px solid #D5DCE5;border-radius:10px;background:#fff;color:#0F1B2D";
+    const todosM = P.meses.map((_, i) => i), van = vp(todosM) + vt;
+    cont.innerHTML = presMarco(`${presRotulo("Cálculo del VAN")}${chips}
+        <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap"><span class="pres-cifra" style="font-size:32px;font-weight:700;color:#003058">Cierres del plan</span>
+          <span style="margin-left:auto;font-size:17px;color:#5B6B7D">Desde <select id="dem-pres-desde" style="${selSt}">${opA(desde)}</select> hasta <select id="dem-pres-hasta" style="${selSt}">${opA(hasta)}</select></span></div>
+        <div style="overflow:auto;flex-grow:1;min-height:0">${h}</tbody></table></div>`,
+      `${presCifra(mig === "conservadora" ? "VAN del plan, supuesto HCH" : "VAN del plan", mmM(van), "#C2410C", R ? `${mmM(van - R.modelo.vanPlan)} frente al modelo (${mmM(R.modelo.vanPlan)})` : "")}${presCifra(`Valor presente ${desde === hasta ? desde : `${desde} a ${hasta}`}`, mmM(vp(todos)), "#003058", "", "clamp(36px,5vh,56px)")}
+       ${presCifra("Valor terminal", mmM(vt), "#003058", `${fmt.num((vt / van) * 100, 0)}% del VAN`, "clamp(36px,5vh,56px)")}`);
+    $("dem-pres-desde").onchange = (e) => { APP._demPresDesde = e.target.value; if (APP._demPresHasta && APP._demPresHasta < e.target.value) APP._demPresHasta = e.target.value; pintarDemPres(); };
+    $("dem-pres-hasta").onchange = (e) => { APP._demPresHasta = e.target.value; if (APP._demPresDesde && APP._demPresDesde > e.target.value) APP._demPresDesde = e.target.value; pintarDemPres(); };
+  }
+  cont.querySelectorAll("[data-dem-vista]").forEach((b) => (b.onclick = () => { APP._demPresVista = b.dataset.demVista; pintarDemPres(); }));
+  cont.querySelectorAll("[data-dem-mig]").forEach((b) => (b.onclick = () => {
+    if (b.dataset.demMig === mig) return;
+    aplicarMigracion(b.dataset.demMig, false);
+    try { pintarResultado(); } catch (err) { console.error(err); }
+    pintarDemPres();
+  }));
+}
+// Sensibilidad: que supuesto mueve mas el VAN del plan, cada uno al minimo y al maximo de su rango
+function pintarSensPres() {
+  const cont = contPres("sensibilidad", "sens-pres"), alc0 = APP._sensAlc; APP._sensAlc = "plan";
+  const filas = basesSens(), vb = sensValsBase(), base = sumaSens(filas, vb); APP._sensAlc = alc0;
+  const T = SENS_PARAMS.map((d) => { const [lo, hi] = sensRango(d), l = sumaSens(filas, { ...vb, [d.k]: lo }), h = sumaSens(filas, { ...vb, [d.k]: hi });
+    return { d, lo, hi, l, h, s: Math.abs(h - l) }; }).sort((a, b) => b.s - a.s);
+  const peor = Math.min(...T.flatMap((x) => [x.l, x.h]));
+  cont.innerHTML = presMarco(`${presRotulo("Qué supuesto mueve más el VAN")}<div class="pres-cifra" style="font-size:36px;font-weight:700;color:#003058">Cada supuesto en su mínimo y su máximo</div>
+      <div style="position:relative;flex-grow:1;min-height:260px"><canvas id="chartSensPres"></canvas></div>`,
+    `${presCifra("VAN del plan, caso base", mmM(base))}${presCifra("Lo que más pesa", T[0].d.n, "#003058", `entre ${mmM(Math.min(T[0].l, T[0].h))} y ${mmM(Math.max(T[0].l, T[0].h))}`, "clamp(30px,4vh,44px)")}
+     ${presCifra("En el peor extremo", mmM(peor), peor < 0 ? "#B42318" : "#003058", peor > 0 ? "el plan sigue creando valor" : "el plan deja de crear valor")}`);
+  APP.chartSensPres?.destroy();
+  const col = (v) => (v >= base ? "#2A78D6" : "#E34948");
+  APP.chartSensPres = new Chart($("chartSensPres"), { type: "bar", data: { labels: T.map((x) => x.d.n), datasets: [
+      { data: T.map((x) => [base, x.l]), backgroundColor: T.map((x) => col(x.l)), borderRadius: 5, barPercentage: 0.7, grouped: false },
+      { data: T.map((x) => [base, x.h]), backgroundColor: T.map((x) => col(x.h)), borderRadius: 5, barPercentage: 0.7, grouped: false }] },
+    options: { indexAxis: "y", responsive: true, maintainAspectRatio: false, animation: false, plugins: { legend: { display: false },
+      tooltip: { callbacks: { label: (it) => { const x = T[it.dataIndex], m = it.datasetIndex === 0; return `${x.d.txt(m ? x.lo : x.hi)}: ${mmM(m ? x.l : x.h)}`; } } } },
+      scales: { x: { grid: { color: "#E5E9EF" }, ticks: { callback: (v) => mmM(v), font: { size: 14 }, maxTicksLimit: 6 } }, y: { grid: { display: false }, ticks: { font: { size: 16 } } } } } });
+}
+// Flexibilidad: cuanto cuesta postergar el calendario del plan
+function pintarFlexPres() {
+  const cont = contPres("flexibilidad", "flex-pres"), F = datosFlexibilidad(), pl = F.filas.filter((f) => f.tipo === "plan");
+  const tot = [0, 1, 2, 3].map((d) => pl.reduce((a, f) => a + (f.atrasos[d]?.v ?? 0), 0));
+  cont.innerHTML = presMarco(`${presRotulo("Postergar el calendario")}<div class="pres-cifra" style="font-size:36px;font-weight:700;color:#003058">VAN del plan según el atraso</div>
+      <div style="position:relative;flex-grow:1;min-height:260px"><canvas id="chartFlexPres"></canvas></div>`,
+    `${presCifra("A tiempo", mmM(tot[0]))}${presCifra("Un año tarde", mmM(tot[1] - tot[0]), "#B42318", `${signo(((tot[1] - tot[0]) / Math.abs(tot[0])) * 100, 0, "%")} del VAN`)}
+     ${presCifra("Tres años tarde", mmM(tot[3] - tot[0]), "#B42318", `${signo(((tot[3] - tot[0]) / Math.abs(tot[0])) * 100, 0, "%")} del VAN`)}`);
+  APP.chartFlexPres?.destroy();
+  const pad = (Math.max(...tot) - Math.min(...tot)) * 0.4 || 1;
+  APP.chartFlexPres = new Chart($("chartFlexPres"), { type: "line", data: { labels: ["A tiempo", "1 año", "2 años", "3 años"], datasets: [{ data: tot, borderColor: "#003058", backgroundColor: "#003058", borderWidth: 4, pointRadius: 9, tension: 0.25 }] },
+    options: { responsive: true, maintainAspectRatio: false, animation: false, plugins: { legend: { display: false } },
+      scales: { x: { grid: { display: false }, offset: true, ticks: { font: { size: 18 } } }, y: { suggestedMin: Math.min(...tot) - pad, suggestedMax: Math.max(...tot) + pad, grid: { color: "#E5E9EF" }, ticks: { callback: (v) => mmM(v), font: { size: 14 }, maxTicksLimit: 6 } } } },
+    plugins: [{ id: "valores", afterDatasetsDraw(ch) { const { ctx } = ch; ch.getDatasetMeta(0).data.forEach((pt, i) => { ctx.save(); ctx.fillStyle = "#0F1B2D"; ctx.font = "700 22px 'Barlow Semi Condensed', Inter, sans-serif"; ctx.textAlign = "center"; ctx.fillText(mmM(tot[i]), pt.x, pt.y - 20); ctx.restore(); }); } }] });
 }
 window.alCambiarSimulador = () => {
   if (APP.tab === "red") pintarRed();
@@ -1031,6 +1346,244 @@ function tabla(filas, cols, opts = {}) {
     cols.map((c) => `<td class="${c.n ? "n" : c.w ? "w" : ""}">${c.f ? c.f(f[c.k], f) : esc(f[c.k] ?? "")}</td>`).join("") + "</tr>").join("");
   return `<div class="tbl" style="max-height:${opts.alto || 480}px"><table><thead><tr>${th}</tr></thead><tbody>${tr}</tbody></table></div>`;
 }
+// Plan en Excel con formulas: calendario y VAN de cada cierre. La herramienta fija que sedes cierran, la retencion Huff y la
+// del canal digital; el resto (venta, gastos, descuento, valor terminal, costo de salida, reparto) se recalcula en el Excel.
+// Montos en millones de pesos reales, el mismo calculo de flujosCierre y vanDesdeBase.
+function libroExcelPlan() {
+  const cal = calendarioCierres(), G = gruposPlan(), libro = APP._calMemo.libro, inicio = sumarMeses(historia().corte, 1);
+  const serial = (m) => (Date.UTC(+m.slice(0, 4), +m.slice(5, 7) - 1, 1) - Date.UTC(1899, 11, 30)) / 864e5;
+  const filas = [...G.decididos.map((x) => [...x, "Decidido"]), ...G.plan.map((x) => [...x, "Plan"])]
+    .sort((a, b) => (a[2] !== b[2] ? (a[2] === "Decidido" ? -1 : 1) : a[1].mes < b[1].mes ? -1 : a[1].mes > b[1].mes ? 1 : 0))
+    .map(([id, k, tipo]) => {
+      const s = APP._porId[id], loc = DASHBOARD_DATA.locales[id];
+      if (!s || !loc || sinGastos(s)) return null;
+      const rec = conUso(DASHBOARD_DATA.huff_ids.filter((j) => j !== id && !(cal[j] && cal[j].mes <= k.mes)), id, k.mes, libro);
+      const B = baseCierre(s, rec, inicio, new Set()), venc = mes7(s.vencimiento_contrato);
+      return { id, s, k, tipo, B, loc, venc, van: vanDesdeBase(B, [k.mes]).opciones[0].van,
+        aviso: venc && s.fecha_limite_aviso ? Math.max(0, difMeses(mes7(s.fecha_limite_aviso), venc)) : 0 };
+    }).filter(Boolean);
+  const wb = XLSX.utils.book_new(), nombres = [];
+  const hoja = () => ({});
+  const put = (ws, r, c, v, z) => {
+    const cel = typeof v === "string" && v.startsWith("=") ? { t: "n", f: v.slice(1) } : typeof v === "string" ? { t: "s", v } : v == null ? null : { t: "n", v };
+    if (!cel) return;
+    if (z) cel.z = z;
+    ws[XLSX.utils.encode_cell({ r, c })] = cel;
+  };
+  const cerrar = (ws, nf, nc, anchos) => { ws["!ref"] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: nf - 1, c: nc - 1 } }); ws["!cols"] = anchos.map((w) => ({ wch: w })); };
+  const MM = "#,##0", MM1 = "#,##0.0", PC = "0.0%", FE = "mmm-yyyy";
+
+  // Supuestos
+  const S = hoja(), f = finz(), sup = [
+    ["Tasa de descuento nominal", "TasaNominal", APP.tasaDescuento ?? 0.105, "0.00%"],
+    ["Inflación", "Inflacion", inflacionModelo(), PC],
+    ["Tasa de descuento real", "TasaReal", "=(1+TasaNominal)/(1+Inflacion)-1", "0.00%"],
+    ["Tasa mensual", "TasaMes", "=(1+TasaReal)^(1/12)-1", "0.000%"],
+    ["Impuesto", "Impuesto", f.impuesto, PC],
+    ["Comisión variable", "ComisionVariable", tasaComisionVenta(), PC],
+    ["Ingreso legal HCH", "TasaHCH", TASAS_LEGALES.HCH, PC],
+    ["Ingreso legal CHS", "TasaCHS", TASAS_LEGALES.CHS, PC],
+    ["Ingreso legal VSC", "TasaVSC", TASAS_LEGALES.VSC, PC],
+    ["Ingreso legal CHC", "TasaCHC", TASAS_LEGALES.CHC, PC],
+    ["Costo del canal online", "CostoOnline", APP.factorCostoOnline ?? 0.15, PC],
+    ["Persistencia de la tendencia hasta 2036", "PhiPlan", amortiguacion(), "0.00"],
+    ["Persistencia de la tendencia después de 2036", "PhiTerminal", PHI_TERMINAL, "0.00"],
+    ["Alza real arriendo", "AlzaArriendo", f.crecArriendo, PC],
+    ["Alza real otros gastos", "AlzaOtros", f.crecOtros, PC],
+    ["Inicio del plan", "InicioPlan", serial(inicio), FE],
+    ["Primer año proyectado", "AnoBase", (DASHBOARD_DATA.anos_proy || [2027])[0], "0"],
+    ["Meses de arriendo para salir con contrato vencido", "SalidaVencido", MESES_SALIDA_VENCIDO[1], "0.0"],
+    ["Meses de arriendo para salir sin contrato", "SalidaSinContrato", MESES_SALIDA_SIN_DATO[1], "0.0"],
+  ];
+  put(S, 0, 0, "Supuesto"); put(S, 0, 1, "Valor");
+  sup.forEach(([t, n, v, z], i) => { put(S, i + 1, 0, t); put(S, i + 1, 1, v, z); nombres.push({ Name: n, Ref: `Supuestos!$B$${i + 2}` }); });
+  put(S, sup.length + 2, 0, "Montos en millones de pesos reales");
+  cerrar(S, sup.length + 3, 2, [46, 12]);
+
+  // Datos por sede
+  const D = hoja(), MESES = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
+  const cabD = ["Id", "Sede", "Gestión", "Zona remota", "Venta año 1", ...MESES.map((m) => `Peso ${m}`), "Tendencia anual", "Tendencia usada",
+    "Mix HCH", "Mix CHS", "Mix VSC", "Mix CHC", "Margen", "Margen HCH", "Margen CHS", "Arriendo mensual", "Otros gastos mensual", "Costo de cierre",
+    "Retención física", "Retención digital", "Vencimiento contrato", "Meses de aviso", "Meses de salida antes del vencimiento", "Meses del plan"];
+  cabD.forEach((t, c) => put(D, 0, c, t));
+  filas.forEach((x, i) => {
+    const r = i + 1, R = r + 1, s = x.s, w = x.loc.month_weights?.length === 12 ? x.loc.month_weights : Array(12).fill(1 / 12), mx = mixSede(s);
+    const v = [x.id, nombreLindo(s.nombre), gestionCod(s), x.B.remota ? 1 : 0, (x.loc.proy_anual_base.real_p50 || [])[0] || 0, ...w,
+      (s.crecimiento_anual_pct ?? 0) / 100, `=MAX(-0.12,MIN(0.05,R${R}))`, mx.HCH || 0, mx.CHS || 0, mx.VSC || 0, mx.CHC || 0,
+      `=T${R}*TasaHCH+U${R}*TasaCHS+V${R}*TasaVSC+W${R}*TasaCHC-ComisionVariable`, `=T${R}*(TasaHCH-ComisionVariable)`, `=U${R}*(TasaCHS-ComisionVariable)`,
+      (s.arriendo_mensual_clp || 0) / 1e6, (s.otros_fijos_anual_clp || 0) / 12 / 1e6, (s.costo_cierre_clp || 0) / 1e6, x.B.e.physProb, x.B.md,
+      x.venc ? serial(x.venc) : null, x.aviso, x.venc ? paramSede(x.id)?.meses_salida_moda ?? 3 : null, `=COUNTIF(Flujos!$A:$A,A${R})`];   // sin contrato no aplica: usa Supuestos
+    const z = [null, null, null, "0", MM1, ...Array(12).fill(PC), PC, PC, PC, PC, PC, PC, "0.00%", "0.00%", "0.00%", MM1, MM1, MM1, PC, PC, FE, "0", "0.0", "0"];
+    v.forEach((val, c) => put(D, r, c, val, z[c]));
+  });
+  cerrar(D, filas.length + 1, cabD.length, [12, 20, 8, 7, 11, ...Array(12).fill(8), 10, 10, 8, 8, 8, 8, 8, 9, 9, 10, 10, 10, 10, 10, 11, 8, 10, 8]);
+
+  // Flujos: una fila por sede y mes
+  const F = hoja(), cabF = ["Id", "Fila", "Mes del plan", "Mes", "Año", "Nivel de venta", "Venta", "Ingreso perdido", "Recupera física", "Recupera digital",
+    "Gastos ahorrados", "Factor de descuento", "Ahorro descontado", "Pérdida neta descontada", "Pérdida neta", "Año calendario", "Tipo", "Cerrada"];
+  cabF.forEach((t, c) => put(F, 0, c, t));
+  let r = 1;
+  for (const x of filas) for (let k = 0; k < x.B.n; k++, r++) {
+    const R = r + 1, ix = (col) => `INDEX(Datos!$${col}:$${col},$B${R})`;
+    [x.id, `=MATCH(A${R},Datos!$A:$A,0)`, k, `=EDATE(InicioPlan,C${R})`, `=MAX(0,YEAR(D${R})-AnoBase)`,
+      `=IF(E${R}=0,1,IF(E${R}=E${R - 1},F${R - 1},F${R - 1}*MAX(0.2,MIN(2,1+${ix("S")}*PhiPlan^E${R}))))`,
+      `=${ix("E")}*INDEX(Datos!$F:$Q,$B${R},MONTH(D${R}))*F${R}`, `=G${R}*${ix("X")}`, `=H${R}*${ix("AD")}`,
+      `=H${R}*(1-${ix("AD")})*${ix("AE")}*(1-CostoOnline)`,
+      `=${ix("AA")}*(1+AlzaArriendo)^(E${R}+1)+${ix("AB")}*(1+AlzaOtros)^(E${R}+1)`, `=(1+TasaMes)^-(C${R}+1)`,
+      `=K${R}*L${R}`, `=O${R}*L${R}`, `=H${R}-I${R}-J${R}`, `=YEAR(D${R})`, `=INDEX(Calendario!$D:$D,MATCH($A${R},Calendario!$B:$B,0))`,
+      `=IF(C${R}>=INDEX(Calendario!$O:$O,MATCH($A${R},Calendario!$B:$B,0)),1,0)`]
+      .forEach((v, c) => put(F, r, c, v, [null, "0", "0", FE, "0", "0.000", MM1, MM1, MM1, MM1, MM1, "0.0000", MM1, MM1, MM1, "0", null, "0"][c]));
+  }
+  cerrar(F, r, cabF.length, [12, 5, 7, 9, 5, 8, 9, 9, 9, 9, 9, 9, 10, 10, 9, 8, 9, 7]);
+
+  // Valor terminal: gastos y venta despues de 2036, 40 anos y luego perpetuidad
+  const V = hoja(), cabV = ["Id", "Fila", "Gastos últimos 12 meses", "Pérdida neta últimos 12 meses", "Alza de gastos", "Factor gastos", "Factor venta",
+    "Descuento fin del plan", "Valor terminal ahorro", "Valor terminal pérdida"];
+  cabV.forEach((t, c) => put(V, 0, c, t));
+  for (let h = 1; h <= 40; h++) put(V, 0, 9 + h, h);
+  const colH = (h) => XLSX.utils.encode_col(9 + h), c1 = colH(1), c40 = colH(40);
+  filas.forEach((x, i) => {
+    const R = i + 2, ix = (col) => `INDEX(Datos!$${col}:$${col},$B${R})`, ult = `Flujos!$A:$A,$A${R},Flujos!$C:$C,">="&(${ix("AI")}-12)`;
+    [x.id, `=MATCH(A${R},Datos!$A:$A,0)`, `=SUMIFS(Flujos!$K:$K,${ult})`, `=SUMIFS(Flujos!$O:$O,${ult})`,
+      `=IF(${ix("AA")}+${ix("AB")}>0,(${ix("AA")}*AlzaArriendo+${ix("AB")}*AlzaOtros)/(${ix("AA")}+${ix("AB")}),AlzaOtros)`,
+      `=((1+E${R})/(1+TasaReal))*(1-((1+E${R})/(1+TasaReal))^40)/(1-(1+E${R})/(1+TasaReal))+((1+E${R})/(1+TasaReal))^40*(1+E${R})/MAX(0.02,TasaReal-E${R})`,
+      `=SUMPRODUCT(${c1}${R}:${c40}${R},(1+TasaReal)^(-${c1}$1:${c40}$1))+${c40}${R}*(1+TasaReal)^-40/MAX(0.02,TasaReal)`,
+      `=(1+TasaMes)^-${ix("AI")}`, `=C${R}*F${R}*H${R}`, `=D${R}*G${R}*H${R}`]
+      .forEach((v, c) => put(V, i + 1, c, v, [null, "0", MM1, MM1, "0.00%", "0.00", "0.00", "0.0000", MM1, MM1][c]));
+    for (let h = 1; h <= 40; h++) {
+      const paso = `MAX(0.2,1+${ix("S")}*IF(AND(${ix("D")}=1,${ix("S")}<0),1,PhiTerminal^${colH(h)}$1))`;
+      put(V, i + 1, 9 + h, h === 1 ? `=${paso}` : `=${colH(h - 1)}${R}*${paso}`, "0.000");
+    }
+  });
+  cerrar(V, filas.length + 1, 50, [12, 5, 11, 11, 8, 8, 8, 9, 11, 11, ...Array(40).fill(6)]);
+
+  // Calendario
+  const C = hoja(), cabC = ["Sede", "Id", "Gestión", "Tipo", "Fecha de cierre", "Aviso hasta", "Ahorro de gastos", "Ingreso perdido neto", "Costo de salida",
+    "VAN", "VAN Hipódromo Chile", "VAN Club Hípico", "P(VAN>0)", "Fila", "Mes del plan", "Costo de salida sin descontar"];
+  cabC.forEach((t, c) => put(C, 0, c, t));
+  filas.forEach((x, i) => {
+    const R = i + 2, ix = (col) => `INDEX(Datos!$${col}:$${col},$N${R})`, vt = (col) => `INDEX('Valor terminal'!$${col}:$${col},$N${R})`;
+    const desde = `Flujos!$A:$A,$B${R},Flujos!$C:$C,">="&$O${R}`;
+    [nombreLindo(x.s.nombre), x.id, gestionCod(x.s), x.tipo, serial(x.k.mes), `=IF(${ix("AG")}>0,EDATE(E${R},-${ix("AG")}),"")`,
+      `=SUMIFS(Flujos!$M:$M,${desde})+${vt("I")}`, `=SUMIFS(Flujos!$N:$N,${desde})+${vt("J")}`,
+      `=P${R}*(1+TasaMes)^-(MIN(O${R},${ix("AI")}-1)+1)`,
+      `=(G${R}-H${R}-I${R})*(1-Impuesto)`,
+      `=(G${R}*${ix("T")}-H${R}*${ix("Y")}/${ix("X")}-I${R}*${ix("T")})*(1-Impuesto)`,
+      `=(G${R}*${ix("U")}-H${R}*${ix("Z")}/${ix("X")}-I${R}*${ix("U")})*(1-Impuesto)`,
+      x.k.mc?.prob ?? null, `=MATCH(B${R},Datos!$A:$A,0)`, `=MAX(0,(YEAR(E${R})-YEAR(InicioPlan))*12+MONTH(E${R})-MONTH(InicioPlan))`,
+      `=MAX(${ix("AC")},IF(${ix("AF")}="",SalidaSinContrato,IF(E${R}>=${ix("AF")},SalidaVencido,${ix("AH")}))*${ix("AA")})`]
+      .forEach((v, c) => put(C, i + 1, c, v, [null, null, null, null, FE, FE, MM, MM, MM, MM, MM, MM, "0%", "0", "0", MM1][c]));
+  });
+  const u = filas.length + 1, t0 = u + 1, rng = (c) => `${c}2:${c}${u}`;
+  [["VAN del plan", "Plan"], ["VAN cierres decididos", "Decidido"]].forEach(([t, tipo], j) => {
+    put(C, t0 + j, 0, t);
+    ["J", "K", "L"].forEach((c, q) => put(C, t0 + j, 9 + q, `=SUMIF(${rng("D")},"${tipo}",${rng(c)})`, MM));
+  });
+  put(C, t0 + 2, 0, "VAN total");
+  ["J", "K", "L"].forEach((c, q) => put(C, t0 + 2, 9 + q, `=SUM(${rng(c)})`, MM));
+  put(C, t0 + 4, 0, "La herramienta decide qué sedes cierran. Cambiar fechas o supuestos recalcula el VAN, no la lista de sedes.");
+  cerrar(C, t0 + 5, cabC.length, [22, 12, 8, 9, 11, 11, 11, 12, 10, 10, 12, 12, 9, 5, 7, 10]);
+  C["!cols"][13].hidden = C["!cols"][14].hidden = C["!cols"][15].hidden = true;
+
+  // Flujos anuales: los mismos flujos mensuales sumados por ano, antes y despues de impuesto, y su valor presente.
+  // El total del valor presente (anos + valor terminal) es el VAN de la hoja Calendario
+  const A = hoja(), a0 = +inicio.slice(0, 4), aF = +finPlan().slice(0, 4), anosA = []; for (let y = a0; y <= aF; y++) anosA.push(y);
+  const nA = anosA.length, colA = (j) => XLSX.utils.encode_col(1 + j), cVT = XLSX.utils.encode_col(1 + nA), cTot = XLSX.utils.encode_col(2 + nA);
+  put(A, 0, 0, "Millones de pesos reales"); anosA.forEach((y, j) => put(A, 0, 1 + j, y, "0")); put(A, 0, 1 + nA, "Después de " + aF); put(A, 0, 2 + nA, "Total");
+  const sumF = (col, tipo, c) => `SUMIFS(Flujos!$${col}:$${col},Flujos!$Q:$Q,"${tipo}",Flujos!$P:$P,${c}$1,Flujos!$R:$R,1)`;
+  const rngC = (c) => `Calendario!$${c}$2:$${c}$${u}`, rngV = (c) => `'Valor terminal'!$${c}$2:$${c}$${u}`;
+  const costoAno = (tipo, c, col) => `SUMPRODUCT((${rngC("D")}="${tipo}")*(YEAR(${rngC("E")})=${c}$1)*${rngC(col)})`;
+  let fA = 1;
+  const bloque = (titulo, tipos) => {
+    put(A, fA, 0, titulo); fA++;
+    const f0 = fA, fila = (n, porAno, vt, z = MM1) => {
+      put(A, fA, 0, n);
+      anosA.forEach((y, j) => put(A, fA, 1 + j, porAno(colA(j), fA + 1), z));
+      if (vt) put(A, fA, 1 + nA, vt, z);
+      put(A, fA, 2 + nA, `=SUM(B${fA + 1}:${vt ? cVT : colA(nA - 1)}${fA + 1})`, z);
+      fA++;
+    };
+    const suma = (fn) => "=" + tipos.map(fn).join("+");
+    fila("Ingreso perdido", (c) => suma((tp) => sumF("H", tp, c)));
+    fila("Recuperado en otras sedes", (c) => suma((tp) => sumF("I", tp, c)));
+    fila("Recuperado en el canal digital", (c) => suma((tp) => sumF("J", tp, c)));
+    fila("Ahorro de gastos", (c) => suma((tp) => sumF("K", tp, c)));
+    fila("Costo de salida", (c) => suma((tp) => costoAno(tp, c, "P")));
+    fila("Flujo antes de impuesto", (c, R) => `=${c}${f0 + 4}-(${c}${f0 + 1}-${c}${f0 + 2}-${c}${f0 + 3})-${c}${f0 + 5}`);
+    fila("Impuesto", (c, R) => `=-${c}${f0 + 6}*Impuesto`);
+    fila("Flujo después de impuesto", (c, R) => `=${c}${f0 + 6}+${c}${f0 + 7}`);
+    fila("Valor presente", (c) => "=(" + tipos.map((tp) => `${sumF("M", tp, c)}-${sumF("N", tp, c)}-${costoAno(tp, c, "I")}`).join("+") + ")*(1-Impuesto)",
+      "=(" + tipos.map((tp) => `SUMPRODUCT((${rngC("D")}="${tp}")*(${rngV("I")}-${rngV("J")}))`).join("+") + ")*(1-Impuesto)");
+    fA++;
+  };
+  bloque("Cierres del plan", ["Plan"]);
+  bloque("Cierres decididos por la gerencia", ["Decidido"]);
+  bloque("Todos los cierres", ["Plan", "Decidido"]);
+  cerrar(A, fA, 3 + nA, [30, ...Array(nA).fill(9), 11, 10]);
+
+  XLSX.utils.book_append_sheet(wb, C, "Calendario");
+  XLSX.utils.book_append_sheet(wb, A, "Flujos anuales");
+  XLSX.utils.book_append_sheet(wb, S, "Supuestos");
+  XLSX.utils.book_append_sheet(wb, D, "Datos");
+  XLSX.utils.book_append_sheet(wb, F, "Flujos");
+  XLSX.utils.book_append_sheet(wb, V, "Valor terminal");
+  wb.Workbook = { Names: nombres };
+  return { wb, control: filas.map((x) => ({ id: x.id, tipo: x.tipo, van: x.van, plan: x.k.van })) };
+}
+// Datos para el Excel del plan armado en Python (openpyxl): lo que el libro recalcula con formulas (Datos de las 19 sedes que
+// cierran, supuestos, criterios del score de toda la red) y lo que viene de la herramienta como valores (escenarios de
+// Monte Carlo, tornado de sensibilidad, retencion Huff y Censo). Montos en millones de pesos reales.
+function datosExcelPlan() {
+  const cal = calendarioCierres(), G = gruposPlan(), libro = APP._calMemo.libro, inicio = sumarMeses(historia().corte, 1), f = finz();
+  if (!SIM.sedeSimMap?.size) simCorrerMotor();
+  const filas = [...G.decididos.map((x) => [...x, "Decidido"]), ...G.plan.map((x) => [...x, "Plan"])]
+    .sort((a, b) => (a[2] !== b[2] ? (a[2] === "Decidido" ? -1 : 1) : a[1].mes < b[1].mes ? -1 : a[1].mes > b[1].mes ? 1 : 0))
+    .map(([id, k, tipo]) => {
+      const s = APP._porId[id], loc = DASHBOARD_DATA.locales[id];
+      if (!s || !loc || sinGastos(s)) return null;
+      const rec = conUso(DASHBOARD_DATA.huff_ids.filter((j) => j !== id && !(cal[j] && cal[j].mes <= k.mes)), id, k.mes, libro);
+      const B = baseCierre(s, rec, inicio, new Set()), venc = mes7(s.vencimiento_contrato), mx = mixSede(s);
+      const w = loc.month_weights?.length === 12 ? loc.month_weights : Array(12).fill(1 / 12), r = SIM.sedeSimMap.get(id);
+      return { id, nombre: nombreLindo(s.nombre), gestion: gestionCod(s), tipo, mes: k.mes, remota: B.remota ? 1 : 0, venta0: (loc.proy_anual_base.real_p50 || [])[0] || 0, pesos: w,
+        tend: (s.crecimiento_anual_pct ?? 0) / 100, mix: { HCH: mx.HCH || 0, CHS: mx.CHS || 0, VSC: mx.VSC || 0, CHC: mx.CHC || 0 },
+        arr: (s.arriendo_mensual_clp || 0) / 1e6, otr: (s.otros_fijos_anual_clp || 0) / 12 / 1e6, costo: (s.costo_cierre_clp || 0) / 1e6, fis: B.e.physProb, md: B.md,
+        venc: venc || null, aviso: venc && s.fecha_limite_aviso ? Math.max(0, difMeses(mes7(s.fecha_limite_aviso), venc)) : 0, salida: venc ? paramSede(id)?.meses_salida_moda ?? 3 : null,
+        prob: k.mc?.prob ?? null, van: vanDesdeBase(B, [k.mes]).opciones[0].van, n: B.n, mc: r ? Array.from(r.vectorDeltaVan, (v) => Math.round(v / 1e4) / 100) : [] };
+    }).filter(Boolean);
+  const est = filasEstrategia(calcularPortafolioMCDA());
+  const GR = { CERRAR: "Cierra por el plan", DECIDIDO: "Cierra por decisión de la gerencia", FORTALECER: "En seguimiento", TRANSFORMAR: "Red mínima", FUERA: "Fuera del análisis" };
+  const red = est.map((x) => ({ id: x.id, nombre: nombreLindo(x.nombre), zona: x.zona, grupo: GR[x.grupo] || x.grupo, venta: x.vtaMes, arriendo: x.arrMes, tendencia: x.tendRel,
+    margen: x.margenAnual, mes: x.mes || mantieneDe(x.id)?.mes || null, mantener: x.vMant ?? null, cerrar: x.vCerr ?? null, van: x.van ?? null, prob: x.prob ?? null }));
+  // Tornado del plan: cada supuesto al minimo y al maximo de su rango
+  const alc0 = APP._sensAlc; APP._sensAlc = "plan";
+  const fb = basesSens(), vb = sensValsBase(), base = sumaSens(fb, vb); APP._sensAlc = alc0;
+  const tornado = SENS_PARAMS.map((d) => { const [lo, hi] = sensRango(d); return { n: d.n, bajo: d.txt(lo), alto: d.txt(hi), vb: sumaSens(fb, { ...vb, [d.k]: lo }), va: sumaSens(fb, { ...vb, [d.k]: hi }) }; });
+  const logos = [...document.querySelectorAll(".logos img")].map((im) => String(im.src).split(",")[1] || null);
+  return { inicio, anoBase: (DASHBOARD_DATA.anos_proy || [2027])[0], fin: finPlan(), iteraciones: SIM.iteraciones, probMin: probMin(),
+    supuestos: { tasa: APP.tasaDescuento ?? 0.105, inflacion: inflacionModelo(), impuesto: f.impuesto, comision: tasaComisionVenta(), tasas: TASAS_LEGALES, online: APP.factorCostoOnline ?? 0.15,
+      phiPlan: amortiguacion(), phiTerminal: PHI_TERMINAL, alzaArr: f.crecArriendo, alzaOtr: f.crecOtros, salidaVencido: MESES_SALIDA_VENCIDO[1], salidaSin: MESES_SALIDA_SIN_DATO[1] },
+    pesos: APP.pesosScore || { vol: 0.35, efic: 0.40, tend: 0.25 }, umbrales: { alto: (APP.umbralesScore || {}).alto ?? 65, bajo: (APP.umbralesScore || {}).bajo ?? 45 },
+    filas, red, tornado, base, logos };
+}
+async function descargarExcelPlan() {
+  if (state.currencyMode === "NOMINAL") { alert("El Excel se arma en pesos reales. Cambia la moneda a reales y vuelve a descargar."); return; }
+  const b = $("btn-excel"), txt = b?.textContent;
+  try {
+    if (b) { b.disabled = true; b.textContent = "Armando Excel…"; }
+    const r = await pedirPython({ tipo: "excel", entrada: JSON.stringify(datosExcelPlan()), zip: $("zip-openpyxl")?.textContent || null });
+    const bin = atob(r.b64), u8 = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([u8], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
+    a.download = `plan_cierres_${new Date().toISOString().slice(0, 10)}.xlsx`; a.click();
+  } catch (e) {
+    console.warn("Excel con formato no disponible, se baja la version simple", e);
+    descargarExcelPlanSimple();
+  } finally { if (b) { b.disabled = false; b.textContent = txt; } }
+}
+function descargarExcelPlanSimple() {
+  if (state.currencyMode === "NOMINAL") { alert("El Excel se arma en pesos reales. Cambia la moneda a reales y vuelve a descargar."); return; }
+  XLSX.writeFile(libroExcelPlan().wb, `plan_cierres_${new Date().toISOString().slice(0, 10)}.xlsx`);
+}
 function descargarCSV(filas, cols, nombre) {
   const lin = [cols.map((c) => c.t).join(";")].concat(filas.map((f) => cols.map((c) => (f[c.k] == null ? "" : String(f[c.k]).replace(/;/g, ","))).join(";")));
   const a = document.createElement("a");
@@ -1062,12 +1615,97 @@ function avisosCarga(inf) {
     else if (p.nivel === "ERROR") revisar.push([p.hoja, p.mensaje, null]);
     else auto.push(p);
   }
+  APP._nRevisar = revisar.length;
   if (!revisar.length && !auto.length) return "";
   const fila = ([tit, txt, ancla]) => `<li class="py-1.5 border-t border-slate-100 first:border-0"><b class="text-slate-800">${esc(tit)}</b>
-    <span class="text-slate-600">· ${esc(txt)}</span>${ancla ? ` <a href="#" class="underline text-[#2E3192]" data-ir-a="${ancla}">ver</a>` : ""}</li>`;
+    <span class="text-slate-600">${esc(txt)}</span>${ancla ? ` <a href="#" class="underline text-[#2E3192]" data-ir-a="${ancla}">ver</a>` : ""}</li>`;
   return (revisar.length ? `<h3>Para revisar</h3><ul class="text-[13px]">${revisar.map(fila).join("")}</ul>` : "")
     + (auto.length ? `<details class="mt-3 text-xs text-slate-500"><summary class="cursor-pointer">Ajustes automáticos (${auto.length})</summary>
       <ul class="mt-1 space-y-0.5">${auto.map((p) => `<li>${esc(p.hoja)}: ${esc(p.mensaje)}</li>`).join("")}</ul></details>` : "");
+}
+// Ajustes: los supuestos en una lista, con el valor del informe al lado y el VAN del plan con los valores actuales.
+// Los controles originales (paneles de Ruben) quedan ocultos y se mueven desde aqui, asi se usan sus mismos calculos
+const SUP_INFORME = { tasa: 10.5, infl: 3.0, dig: 10, fo: 0.15, prob: 70, g1: null, k: 50, phi: 0.94 };
+function supuestosActuales() {
+  return { tasa: Math.round((APP.tasaDescuento ?? 0.105) * 1000) / 10, infl: Math.round((state.inflationRate ?? 0.03) * 1000) / 10,
+    dig: Math.round((APP.retencionDigitalCierre ?? APP.retencionDigital ?? 0.10) * 100), fo: APP.factorCostoOnline ?? 0.15,
+    prob: Math.round(probMin() * 100), g1: state.g1_override ?? 0, k: Math.round((state.shrinkage ?? 0.5) * 100), phi: state.phi ?? 0.94 };
+}
+function vanPlanActual() {
+  const P = flujosPlanMes(), X = P.por.propuesto, tx = P.tx;
+  let v = 0;
+  for (let i = 0; i < P.meses.length; i++) v += ((X.gas[i] - X.com[i] + X.recF[i] + X.recD[i] - X.costo[i]) * (1 - tx) + X.ct[i]) * P.d[i];
+  return v + (X.vt.gas - X.vt.com + X.vt.recF + X.vt.recD) * (1 - tx);
+}
+function aplicarSupuesto(k, v) {
+  const fija = (id, x) => { if ($(id)) $(id).value = x; };
+  if (k === "tasa" || k === "dig") {
+    if (k === "tasa") { APP.tasaDescuento = APP.tasaDescuentoCierre = v / 100; fija("sliderTasaDescuento", v); }
+    else { APP.retencionDigital = APP.retencionDigitalCierre = v / 100; fija("sliderRetencionDigital", v); }
+    sincronizarSupuestos();
+  } else if (k === "fo") { APP.factorCostoOnline = v; fija("selCostoOnline", String(v.toFixed(2))); }
+  else if (k === "prob") APP.finanzas = { ...finz(), probMin: v / 100 };
+  else if (k === "infl") { state.inflationRate = v / 100; fija("sliderInfl", v); }
+  else if (k === "g1") { state.g1_override = v; fija("sliderG1", v); }
+  else if (k === "k") { state.shrinkage = v / 100; fija("sliderShrinkage", v); }
+  else if (k === "phi") { state.phi = v; fija("sliderPhi", v); }
+  if (["infl", "g1", "k", "phi"].includes(k) && typeof onDynamicParamChange === "function") onDynamicParamChange();
+}
+function refrescarTrasSupuestos() {
+  try { if (APP.tab && APP.tab !== "carga") irA(APP.tab); } catch (err) { console.error(err); }
+  pintarSupuestosAjustes();
+}
+function pintarSupuestosAjustes() {
+  const caja = $("aj-sup");
+  if (!caja || !APP.est) return;
+  const A = supuestosActuales(), I = { ...SUP_INFORME, g1: APP._g1Informe ?? A.g1 };
+  APP._g1Informe ??= A.g1;
+  const num = (v, d) => fmt.num(v, d);
+  const FILAS = [
+    ["tasa", "Tasa de descuento nominal", 4, 20, 0.05, (v) => `${num(v, 1)}%`],
+    ["infl", "Inflación", 0, 10, 0.5, (v) => `${num(v, 1)}%`],
+    ["dig", "Clientes sin sede cerca que pasan a online", 0, 80, 1, (v) => `${num(v, 0)}%`],
+    ["fo", "Costo del canal online", null, null, null, (v) => `${num(v * 100, 0)}% del presencial`],
+    ["prob", "Escenarios con VAN positivo para cerrar", 50, 95, 5, (v) => `${num(v, 0)}%`],
+  ];
+  const GRAF = [
+    ["g1", "Tendencia de la venta", -20, 15, 0.1, (v) => `${v > 0 ? "+" : ""}${num(v, 1)}%`],
+    ["k", "Peso de la tendencia propia", 0, 100, 5, (v) => `${num(v, 0)}%`],
+    ["phi", "Amortiguación anual", 0.5, 1, 0.01, (v) => num(v, 2)],
+  ];
+  const fila = ([k, lbl, mn, mx, st, f]) => {
+    const dif = Math.abs(A[k] - I[k]) > 1e-9;
+    const ctl = k === "fo" ? `<select data-sup="fo" class="border border-slate-300 rounded-lg px-2 py-1 text-xs w-full">${[0.15, 0.10, 0.25, 0.05, 0].map((o) => `<option value="${o}" ${Math.abs(o - A.fo) < 1e-9 ? "selected" : ""}>${num(o * 100, 0)}% del presencial</option>`).join("")}</select>`
+      : `<input type="range" data-sup="${k}" min="${mn}" max="${mx}" step="${st}" value="${A[k]}" class="w-full accent-[#003058]">`;
+    return `<div class="grid grid-cols-12 gap-3 items-center py-2.5 border-b border-slate-100">
+      <span class="col-span-12 sm:col-span-4 text-[13px] text-slate-700">${lbl}</span>
+      <span class="col-span-7 sm:col-span-4">${ctl}</span>
+      <span class="col-span-3 sm:col-span-2 text-right text-[13px] font-bold tabular-nums ${dif ? "text-[#C2410C]" : "text-pizarra-900"}" data-val="${k}">${k === "fo" ? "" : f(A[k])}</span>
+      <span class="col-span-2 sm:col-span-2 text-right text-xs text-slate-500 tabular-nums">${k === "fo" ? f(I[k]) : f(I[k])}</span></div>`;
+  };
+  const cab = (t) => `<div class="grid grid-cols-12 gap-3 text-[11px] font-semibold text-slate-500 pb-1 border-b border-slate-200"><span class="col-span-10">${t}</span><span class="col-span-2 text-right">Informe</span></div>`;
+  const van = vanPlanActual(), cambiado = Object.keys(SUP_INFORME).some((k) => Math.abs(A[k] - I[k]) > 1e-9);
+  caja.innerHTML = `<div class="card">${cab("Supuestos del VAN")}${FILAS.map(fila).join("")}
+      <div class="flex flex-wrap items-end justify-between gap-3 pt-4">
+        <div><div class="text-[11px] text-slate-500">VAN del plan con estos supuestos</div><div class="text-2xl font-extrabold tabular-nums ${cambiado ? "text-[#C2410C]" : "text-pizarra-900"}" id="aj-van">${mmM(van)}</div></div>
+        <button type="button" class="btn-s" id="aj-volver" ${cambiado ? "" : "disabled"}>Volver a los del informe</button></div></div>
+    <div class="card mt-4">${cab("Gráfico de demanda")}${GRAF.map(fila).join("")}</div>`;
+  caja.querySelectorAll("[data-sup]").forEach((el) => {
+    const k = el.dataset.sup, f = [...FILAS, ...GRAF].find((x) => x[0] === k)[5];
+    el.oninput = () => { const o = caja.querySelector(`[data-val="${k}"]`); if (o && k !== "fo") o.textContent = f(+el.value); };
+    el.onchange = () => {
+      $("aj-van").textContent = "Calculando...";
+      setTimeout(() => { aplicarSupuesto(k, +el.value); refrescarTrasSupuestos(); }, 20);
+    };
+  });
+  $("aj-volver").onclick = () => {
+    $("aj-van").textContent = "Calculando...";
+    setTimeout(() => {
+      for (const k of ["tasa", "infl", "dig", "fo", "prob", "k", "phi"]) aplicarSupuesto(k, SUP_INFORME[k]);
+      if (typeof restoreCleanG1 === "function") restoreCleanG1();
+      refrescarTrasSupuestos();
+    }, 20);
+  };
 }
 function pintarInforme() {
   const inf = APP.est.informe || {}, r = inf.resumen || {};
@@ -1080,29 +1718,28 @@ function pintarInforme() {
   const probs = avisosCarga(inf);
   const alerta = (a) => `<span class="chip ${/VENCIDO/.test(a) ? "err" : /PROXIMO|DISTINTAS/.test(a) ? "warn" : "info"}">${esc(a)}</span>`;
   if (!$("tab-informe")) return;
+  const pleg = (id, tit, cuerpo) => `<details class="card plegado" ${id ? `id="${id}"` : ""}><summary class="cursor-pointer font-extrabold text-pizarra-900">${tit}</summary><div class="mt-3">${cuerpo}</div></details>`;
+  const vista = APP._ajVista || "sup";
   $("tab-informe").innerHTML = `
-  <div class="space-y-5">
-    <div class="card"><h2>Resumen de la carga</h2><div class="grid grid-cols-2 md:grid-cols-4 gap-3">${kpis}</div>
+  <div class="seg-esc mb-4" role="group" aria-label="Ajustes"><button type="button" data-aj="sup" aria-pressed="${vista === "sup"}">Supuestos</button>
+    <button type="button" data-aj="carga" aria-pressed="${vista === "carga"}">Revisión de la carga${APP._nRevisar ? ` (${APP._nRevisar} por revisar)` : ""}</button></div>
+  <div id="aj-sup" ${vista === "sup" ? "" : "hidden"}></div>
+  <div id="aj-carga" class="space-y-3" ${vista === "carga" ? "" : "hidden"}>
+    <div class="card"><div class="grid grid-cols-2 md:grid-cols-4 gap-3">${kpis}</div>
       ${probs}</div>
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
-      <div class="card"><h2>Hojas reconocidas</h2>${tabla(inf.hojas, [{ k: "hoja", t: "Hoja" }, { k: "tipo", t: "Tipo" }, { k: "ano", t: "Año" }, { k: "filas", t: "Filas", n: 1 }])}
-        <h3 id="inf-cuadre">Cuadre de ventas entre hojas</h3>
+    ${pleg("", "Hojas y columnas reconocidas", `${tabla(inf.hojas, [{ k: "hoja", t: "Hoja" }, { k: "tipo", t: "Tipo" }, { k: "ano", t: "Año" }, { k: "filas", t: "Filas", n: 1 }])}
+        <h3>Columnas clave</h3>${tabla(inf.columnas, [{ k: "hoja", t: "Hoja" }, { k: "campo", t: "Campo" },
+          { k: "encontrada", t: "Estado", f: (v, f) => v ? `<span class="chip ${f.filas_con_dato >= 0.5 ? "ok" : "warn"}">${fmt.pct(f.filas_con_dato)} con dato</span>` : `<span class="chip err">no encontrada</span>` },
+          { k: "columna", t: "Columna" }], { alto: 380 })}`)}
+    <details class="card plegado" id="inf-cuadre"><summary class="cursor-pointer font-extrabold text-pizarra-900">Cuadre de ventas e identidades contables</summary><div class="mt-3">
         ${tabla(inf.cuadre_resumen, [{ k: "comparacion", t: "Comparación" }, { k: "n", t: "N", n: 1 },
           { k: "cuadran", t: "Cuadran", n: 1, f: (v, f) => `${v} <span class="chip ${v === f.n ? "ok" : "warn"}">${fmt.pct(v / f.n)}</span>` }], { alto: 300 })}
         ${(inf.cuadre_fallas || []).length ? "<h3>Diferencias fuera de tolerancia</h3>" + tabla(inf.cuadre_fallas, [{ k: "comparacion", t: "Comparación" }, { k: "sede_id", t: "Sede" }, { k: "periodo", t: "Periodo" }, { k: "dif_pct", t: "Dif.", n: 1, f: (v) => fmt.pct(v, 1) }], { alto: 260 }) : ""}
-      </div>
-      <div class="card"><h2>Columnas clave encontradas</h2>
-        <p class="text-xs text-slate-500 mb-2">Qué columnas necesarias encontró la herramienta en cada hoja y en qué % de filas tienen dato. Si falta una, revisar el nombre del encabezado.</p>
-        ${tabla(inf.columnas, [{ k: "hoja", t: "Hoja" }, { k: "campo", t: "Campo" },
-          { k: "encontrada", t: "Estado", f: (v, f) => v ? `<span class="chip ${f.filas_con_dato >= 0.5 ? "ok" : "warn"}">${fmt.pct(f.filas_con_dato)} con dato</span>` : `<span class="chip err">no encontrada</span>` },
-          { k: "columna", t: "Columna" }], { alto: 380 })}
-      </div>
-      <div class="card"><h2>Identidades contables</h2>
-        <p class="text-xs text-slate-500 mb-2">Qué fórmulas se cumplen en el Excel, fila por fila.</p>
+        <h3>Identidades contables</h3>
         ${tabla(inf.identidades, [{ k: "hoja", t: "Hoja" }, { k: "regla", t: "Regla", w: 1 }, { k: "filas", t: "Filas", n: 1 },
           { k: "resultado", t: "Resultado", f: (v, f) => (f.cumplen == null ? esc(v) : `<span class="chip ${v === "100%" ? "ok" : "warn"}">${esc(v)}</span>`) }], { alto: 440 })}
-      </div>
-      <div class="card" id="inf-nombres"><h2>Nombres de EN PROCESO y CTA ARRIENDO</h2>
+      </div></details>
+      <details class="card plegado" id="inf-nombres"><summary class="cursor-pointer font-extrabold text-pizarra-900">Nombres de EN PROCESO y CTA ARRIENDO</summary><div class="mt-3">
         <p class="text-xs text-slate-500 mb-2">Esas hojas identifican la sede por nombre. Los nombres iguales o casi iguales se cruzan solos. Si alguno no calzó, elige la sede y reanaliza: la elección queda guardada en este navegador.</p>
         ${(inf.pendientes || []).length ? `<div class="tbl"><table><thead><tr><th>Hoja</th><th>Nombre en la hoja</th><th>Es la sede</th></tr></thead><tbody>` +
           inf.pendientes.map((p, i) => `<tr><td>${esc(p.hoja)}</td><td>${esc(p.nombre)}</td><td><select class="border border-slate-300 rounded px-1 py-0.5 text-xs" data-pend="${i}">
@@ -1110,25 +1747,28 @@ function pintarInforme() {
           `</tbody></table></div><button class="btn-p mt-3 solo-edicion" id="btn-pend">Guardar y reanalizar</button>`
           : `<p class="text-xs"><span class="chip ok">OK</span> Todos los nombres se cruzaron.</p>`}
         ${(inf.automaticas || []).length ? "<h3>Cruzados por parecido (revisar)</h3>" + tabla(inf.automaticas, [{ k: "nombre", t: "Nombre en la hoja" }, { k: "asignado_a", t: "Asignado a" }, { k: "similitud", t: "Parecido", n: 1, f: (v) => fmt.pct(v) }], { alto: 220 }) : ""}
-        <h3 id="inf-ubic">Ubicación de las sedes (OpenStreetMap)</h3>
+      </div></details>
+      <details class="card plegado" id="inf-ubic"><summary class="cursor-pointer font-extrabold text-pizarra-900">Ubicación de las sedes</summary><div class="mt-3">
         ${tabla(inf.ubicacion, [{ k: "calidad", t: "Precisión" }, { k: "sedes", t: "Sedes", n: 1 }])}
         <p class="text-[11px] text-slate-400 mt-1">EXACTA y CALLE: dirección encontrada. POR NOMBRE: sede sin dirección en el Excel, ubicada por el nombre del local. CENTRO DE COMUNA o DE SANTIAGO: aproximada, revisar en el mapa.</p>
-      </div>
-      ${(inf.disponibles || []).length ? `<div class="card lg:col-span-2" id="inf-disponibles"><h2>Códigos sin sede (no se analizan)</h2>
+      </div></details>
+      ${(inf.disponibles || []).length ? `<details class="card plegado" id="inf-disponibles"><summary class="cursor-pointer font-extrabold text-pizarra-900">Códigos sin sede</summary><div class="mt-3">
         ${tabla(inf.disponibles, [{ k: "sede_id", t: "Id" }, { k: "motivo", t: "Motivo" }, { k: "nombre_en_ventas", t: "Nombre en VTA HIST" }, { k: "zona", t: "Zona" },
           { k: "primer_mes_venta", t: "Primera venta", f: (v) => (v ? nombreMes(mes7(v)) : "-") },
           { k: "ultimo_mes_venta", t: "Última venta", f: (v) => (v ? nombreMes(mes7(v)) : "Nunca") },
           { k: "venta_12m_nominal", t: "Venta 12m $M", n: 1, f: (v) => (v ? fmt.mm(v) : "-") },
           { k: "arriendo_mensual", t: "Arriendo mensual $M", n: 1, f: (v) => (v == null ? "-" : fmt.mm(v)) },
-          { k: "gestion", t: "Gestión" }, { k: "accion", t: "Acción" }, { k: "vencimiento", t: "Vence", f: fmt.fecha }, { k: "hojas", t: "Aparece en" }], { alto: 380 })}</div>` : ""}
-      <div class="card"><h2>Contratos y plazos</h2>
+          { k: "gestion", t: "Gestión" }, { k: "accion", t: "Acción" }, { k: "vencimiento", t: "Vence", f: fmt.fecha }, { k: "hojas", t: "Aparece en" }], { alto: 380 })}</div></details>` : ""}
+      <details class="card plegado"><summary class="cursor-pointer font-extrabold text-pizarra-900">Contratos y plazos</summary><div class="mt-3">
         ${tabla(inf.contratos, [{ k: "alerta", t: "Alerta", f: alerta }, { k: "nombre", t: "Sede" }, { k: "accion", t: "Acción" }, { k: "status", t: "Status" },
           { k: "vencimiento", t: "Vence", f: fmt.fecha }, { k: "limite_aviso", t: "Límite aviso", f: fmt.fecha }, { k: "fechas_por_fuente", t: "Fechas por hoja" }], { alto: 400 })}
-      </div>
-    </div>
+      </div></details>
   </div>`;
   if ($("tab-informe")) {
-    $("tab-informe").querySelectorAll("[data-ir-a]").forEach((a) => (a.onclick = (e) => { e.preventDefault(); $(a.dataset.irA)?.scrollIntoView({ behavior: "smooth", block: "start" }); }));
+    $("tab-informe").querySelectorAll("[data-ir-a]").forEach((a) => (a.onclick = (e) => { e.preventDefault(); const d = $(a.dataset.irA); const pl = d?.closest("details") || d; if (pl?.tagName === "DETAILS") pl.open = true; d?.scrollIntoView({ behavior: "smooth", block: "start" }); }));
+    $("tab-informe").querySelectorAll("[data-aj]").forEach((b) => (b.onclick = () => { APP._ajVista = b.dataset.aj; $("tab-informe").querySelectorAll("[data-aj]").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+      $("aj-sup").hidden = b.dataset.aj !== "sup"; $("aj-carga").hidden = b.dataset.aj !== "carga"; }));
+    try { pintarSupuestosAjustes(); } catch (err) { console.error(err); }
   }
   const bp = $("btn-pend");
   if (bp) bp.onclick = async () => {
@@ -1260,9 +1900,17 @@ function notaTiempos() {
   if (!f) return "Sin tiempos de viaje: se usa la distancia por calle.";
   return /OSRM/.test(f.auto) ? "Tiempos: OpenStreetMap, Metro y EFE." : "Tiempos estimados por distancia, Metro y EFE.";
 }
+// Tiempos de viaje fijos (ui/tiempos_fijos.json, solo en el repo privado): las rutas reales de la corrida que respalda el
+// informe, para que todos los navegadores usen las mismas. Aplican solo si la red tiene exactamente las mismas sedes.
+const TIEMPOS_FIJOS = /*__TIEMPOS__*/null;
 async function asegurarTiempos(est, aviso = (txt) => ($("red-nota").textContent = txt)) {
   const porId = Object.fromEntries(est.sedes.map((s) => [s.sede_id, s])), red = est.red;
   if (!red?.ids?.length) return false;
+  if (TIEMPOS_FIJOS && JSON.stringify(TIEMPOS_FIJOS.ids) === JSON.stringify(red.ids)) {
+    if (est.tiempos !== TIEMPOS_FIJOS.tiempos && JSON.stringify(est.tiempos) !== JSON.stringify(TIEMPOS_FIJOS.tiempos)) est.tiempos = JSON.parse(JSON.stringify(TIEMPOS_FIJOS.tiempos));
+    est._osrmIntentado = est._accesoIntentado = true;
+    return true;
+  }
   if (!est.tiempos || est.tiempos.version !== VERSION_TIEMPOS) {
     aviso("Calculando tiempos en metro (solo la primera vez para este estado)…");
     const previo = est.tiempos;
@@ -1708,6 +2356,7 @@ function dibujarArista(a, b, pa, pb, { cortada = false, resalta = false, opacida
   }
 }
 function pintarRed() {
+  if (document.body.classList.contains("presentacion")) setTimeout(pintarRedPres, 0);
   if (!APP.est) return;
   prepararCategorias();
   actualizarGrafo();
@@ -1875,7 +2524,7 @@ function tasaEfectiva() {
 }
 // [SUPUESTO] flujo de caja despues de impuesto (Sapag): impuesto de primera categoria, capital de trabajo de cada sede que se
 // libera al cerrarla (sin impuesto) y vida util de la inversion de la mejora para su depreciacion (escudo fiscal)
-const FINANZAS_DEF = { impuesto: 0.27, capitalTrabajo: 0, vidaUtil: 10, crecArriendo: 0.01, crecOtros: 0.02, tolerancia: 0, probMin: 0.80, amortiguacion: 1.0, anosFirmes: 3, metaDigital: 0, costoPrograma: 0, margenSeguimiento: 25 };
+const FINANZAS_DEF = { impuesto: 0.27, capitalTrabajo: 0, vidaUtil: 10, crecArriendo: 0.01, crecOtros: 0.02, tolerancia: 0, probMin: 0.70, amortiguacion: 1.0, metaDigital: 0, costoPrograma: 0, margenSeguimiento: 25 };
 // Fecha de cada cierre: la primera ventana cuyo VAN esta a menos de "tolerancia" del maximo. Por defecto 0% = la fecha de
 // mayor VAN esperado, para que la Flexibilidad muestre postergar como perdida y no como ganancia del margen.
 const finz = () => APP.finanzas || FINANZAS_DEF;
@@ -2062,7 +2711,7 @@ function vanCierrePorMes(s, receptoras, meses, inicio, mejoradas, persp = "TOTAL
 // 0,95) y costo del canal online (10% a 30%). Propias de cada sede: retencion fisica PERT(0,6 x Top-3, Top-3, red completa),
 // retencion digital PERT(3%, moda del Censo, 18%), cambio de tendencia N(0; 2,5 puntos), ruido anual con su volatilidad y
 // meses de salida del contrato. Semilla fija: el calendario y la pestana Simulacion VAN ven los mismos escenarios.
-const PROB_MIN_DEF = 0.80;   // [SUPUESTO] un cierre propuesto debe crear valor en al menos el 80% de los escenarios
+const PROB_MIN_DEF = 0.70;   // [SUPUESTO] un cierre propuesto debe crear valor en al menos el 70% de los escenarios
 function sorteosMC() {
   const N = SIM.iteraciones, rC = tasaEfectiva(), foC = APP.factorCostoOnline ?? 0.15;
   const clave = JSON.stringify([N, rC, foC, SIM.shockG, SIM.spreadCostos, amortiguacion()]);
@@ -2196,8 +2845,6 @@ function retencionNecesaria(B, t) {
   return v0 >= 0 ? 0 : v1 <= 0 ? 1 : -v0 / (v1 - v0);
 }
 const sinGastos = (s) => !(((s.arriendo_mensual_clp || 0) * 12 + (s.otros_fijos_anual_clp || 0)) > 0);
-// Ultimo mes de los cierres firmes: los primeros anosFirmes anos del plan (por defecto 2027 a 2029)
-const limiteFirmes = () => `${(DASHBOARD_DATA?.anos_proy || [2027])[0] + (finz().anosFirmes ?? 3) - 1}-12`;
 // Disparador de un cierre en el mes t: la venta anual (12 meses desde t) con la que el VAN de cerrar en t es cero. El VAN es
 // lineal en el nivel de venta: VAN(lambda) = v0 + (v1 - v0) lambda, con lambda = escala de toda la venta futura.
 function disparadorCierre(B, t) {
@@ -2217,8 +2864,7 @@ function gruposPlan() {
   const cal = calendarioCierres(), M = APP._calMemo.mantiene, v = Object.entries(cal);
   return {
     decididos: v.filter(([, k]) => k.tipo === "decidido"),
-    firmes: v.filter(([, k]) => k.tipo === "propuesto" && k.firme),
-    condicionados: v.filter(([, k]) => k.tipo === "propuesto" && !k.firme),
+    plan: v.filter(([, k]) => k.tipo === "propuesto"),
     seguimiento: Object.entries(M).filter(([, x]) => x.seguimiento),
     red: Object.entries(M).filter(([, x]) => !x.seguimiento && !x.sinDatos && !x.externaliza && !x.renegociada),
     sinDatos: Object.entries(M).filter(([, x]) => x.sinDatos),
@@ -2238,7 +2884,7 @@ function calendarioCierres() {
   const H = historia(), inicio = sumarMeses(H.corte, 1);
   const fin = finPlan();
   const clave = JSON.stringify([claveGrafo(), APP.tasaDescuentoCierre, APP.retencionDigitalCierre, APP.factorCostoOnline, APP.takeoutDigital,
-    state.u0, state.lambda, state.currencyMode, state.inflationRate, APP.mejora, APP.finanzas, SIM.iteraciones, SIM.escalaMf, SIM.shockG, SIM.spreadCostos,
+    state.u0, APP.migracion, state.lambda, state.currencyMode, state.inflationRate, APP.mejora, APP.finanzas, SIM.iteraciones, SIM.escalaMf, SIM.shockG, SIM.spreadCostos,
     APP.pesosScore, APP.umbralesScore]);
   if (APP._calMemo?.est === APP.est && APP._calMemo.clave === clave) return APP._calMemo.cal;
   const cal = {}, fisicas = APP.est.sedes.filter((s) => s.grupo !== "DIGITAL" && s.lat != null && s.lon != null);
@@ -2273,11 +2919,13 @@ function calendarioCierres() {
       const mejor = opciones.reduce((a, b) => (b.van > a.van ? b : a));   // sin mejoras en el plan (efecto sin respaldo)
       // Cierra si en la simulacion el VAN es positivo en al menos probMin de los escenarios, en la primera fecha cuyo VAN
       // esperado esta a menos del margen del maximo (entre las fechas que cumplen esa probabilidad)
+      const manual = CIERRES_EQUIPO.has(id);
       const dec = mejor.van > 0 ? decidirConRiesgo(B, opciones) : null;
       // Segunda llave: el cierre solo entra al plan si el portafolio (score relativo y materialidad) lo pone en una
       // categoria de salida; si el portafolio la protege, la sede queda en seguimiento aunque su VAN sea positivo
-      const protegida = dec && !CATEGORIAS_SALIDA.has(PF[id]?.categoria);
-      if (dec && !protegida) cal[id] = { mes: dec.mes, tipo: "propuesto", cat, plan, avisar: avisar(dec.mes), van: opciones.find((o) => o.mes === dec.mes).van, mc: dec };
+      const protegida = !manual && dec && !CATEGORIAS_SALIDA.has(PF[id]?.categoria);
+      if (manual) { const m = dec?.mes || mejor.mes; cal[id] = { mes: m, tipo: "propuesto", cat, plan, avisar: avisar(m), van: opciones.find((o) => o.mes === m).van, mc: dec || mcCierre(B, [m])[0], manual: true }; }
+      else if (dec && !protegida) cal[id] = { mes: dec.mes, tipo: "propuesto", cat, plan, avisar: avisar(dec.mes), van: opciones.find((o) => o.mes === dec.mes).van, mc: dec };
       else nuevo[id] = { motivo: protegida ? "protegida por el portafolio" : mejor.van > 0 ? "incierto" : "", van: mejor.van, vanMejora, mejora: false, protegida };
     }
     mantiene = nuevo;
@@ -2314,14 +2962,11 @@ function calendarioCierres() {
       return [h, { cierre: r.opciones[0].van, mejora: r.vanMejora }];
     }));
   }
-  // Firmes y condicionados: lo que cae en los primeros anos del plan se decide ahora; lo de despues (y las sedes de la red
-  // minima cerca del umbral) queda en seguimiento con un disparador de venta que se revisa una vez al ano
-  const limFirme = limiteFirmes();
+  // Seguimiento: las sedes que no cierran pero quedan cerca del umbral llevan un disparador de venta que se revisa una vez al ano
   const disparador = (s, t) => disparadorCierre(baseCierre(s, abiertasEn(s.sede_id, t), inicio, mejoradasFin), t);
   for (const s of propuestas) {
     const id = s.sede_id, k = cal[id], x = mantiene[id];
-    if (k?.tipo === "propuesto") { k.firme = k.mes <= limFirme; if (!k.firme) k.disparador = disparador(s, k.mes); }
-    else if (x && x.van != null && x.mes && (x.protegida || (x.van > 0 && x.mc && x.mc.prob >= 0.5) || (x.van <= 0 && x.van > -(finz().margenSeguimiento ?? 25)))) { x.seguimiento = true; x.disparador = disparador(s, x.mes); }
+    if (k?.tipo !== "propuesto" && x && x.van != null && x.mes && (x.protegida || (x.van > 0 && x.mc && x.mc.prob >= 0.5) || (x.van <= 0 && x.van > -(finz().margenSeguimiento ?? 25)))) { x.seguimiento = true; x.disparador = disparador(s, x.mes); }
     if (x && x.van != null && x.mes) { x.retNecesaria = retencionNecesaria(baseCierre(s, abiertasEn(id, x.mes), inicio, mejoradasFin), x.mes); x.sinAlternativa = sinAlternativa(s); }
   }
   APP._calMemo = { est: APP.est, clave, cal, mantiene, libro: libroCapacidad(cal) };
@@ -2526,7 +3171,7 @@ function pintarResumenTiempo() {
   }
   // Calendario por año (zona del mapa): una fila por año; el año del cursor se abre con los nombres
   const porAno = {}, G = gruposPlan();
-  for (const [id, k] of [...G.decididos, ...G.firmes]) if (enZona(id)) (porAno[k.mes.slice(0, 4)] = porAno[k.mes.slice(0, 4)] || []).push([id, k]);
+  for (const [id, k] of [...G.decididos, ...G.plan]) if (enZona(id)) (porAno[k.mes.slice(0, 4)] = porAno[k.mes.slice(0, 4)] || []).push([id, k]);
   const max = Math.max(1, ...Object.values(porAno).map((l) => l.length)), anoSel = m.slice(0, 4);
   $("red-cambios").innerHTML = `<div class="space-y-1">${Object.keys(porAno).sort().map((a) => {
     const l = porAno[a].sort((x, y) => (x[1].mes < y[1].mes ? -1 : x[1].mes > y[1].mes ? 1 : 0)), abierto = a === anoSel;
@@ -2537,12 +3182,11 @@ function pintarResumenTiempo() {
     return fila + `<ul class="tl-lista">${l.map(([id, k]) => `<li class="${k.mes <= m ? "hecho" : ""}"><a href="#" data-ir="${id}">${esc(nombreLindo(nombreNodo(id)))}</a>
       <span>${MESES_NOM[+k.mes.slice(5, 7) - 1]}${k.tipo === "decidido" ? " · decidido" : ""}</span></li>`).join("")}</ul>`;
   }).join("")}</div>
-  ${(() => { const S = [...G.condicionados, ...G.seguimiento].filter(([id]) => enZona(id)).sort((a, b) => (a[1].mes < b[1].mes ? -1 : 1)); return S.length ? `<details class="mt-2 pt-2 border-t border-slate-100" ${APP._verSeg !== false ? "open" : ""} id="red-seguimiento">
-    <summary class="tl-ano cursor-pointer"><span class="flex-1 text-left font-semibold">En seguimiento (desde ${+limiteFirmes().slice(0, 4) + 1})</span><span class="w-20 text-right">${S.length} sede${S.length === 1 ? "" : "s"}</span></summary>
-    <table class="w-full text-xs mt-1"><thead><tr class="text-slate-500"><th class="text-left font-semibold py-1">Sede</th><th class="text-right font-semibold py-1">Cerrar si su venta anual baja de</th><th class="text-right font-semibold py-1">Falta caer</th><th class="text-right font-semibold py-1">Fecha estimada</th></tr></thead><tbody>
+  ${(() => { const S = [...G.seguimiento].filter(([id]) => enZona(id)).sort((a, b) => (a[1].mes < b[1].mes ? -1 : 1)); return S.length ? `<details class="mt-2 pt-2 border-t border-slate-100" ${APP._verSeg !== false ? "open" : ""} id="red-seguimiento">
+    <summary class="tl-ano cursor-pointer"><span class="flex-1 text-left font-semibold">En seguimiento</span><span class="w-20 text-right">${S.length} sede${S.length === 1 ? "" : "s"}</span></summary>
+    <table class="w-full text-xs mt-1"><thead><tr class="text-slate-500"><th class="text-left font-semibold py-1">Sede</th><th class="text-right font-semibold py-1">Cerrar si su venta anual baja de</th><th class="text-right font-semibold py-1">Falta caer</th></tr></thead><tbody>
     ${S.map(([id, x]) => { const d = x.disparador; return `<tr class="border-t border-slate-100"><td class="py-1"><a href="#" data-sel="${id}" class="text-[#003058] hover:underline">${esc(nombreLindo(nombreNodo(id)))}</a></td>
-      <td class="py-1 text-right tabular-nums">${d ? `$${pesos(d.venta / 1e6)}` : "-"}</td><td class="py-1 text-right tabular-nums">${d ? (d.caida > 0 ? `${fmt.num(d.caida * 100, 0)}%` : "ya está bajo") : "-"}</td>
-      <td class="py-1 text-right">${x.tipo === "propuesto" ? nombreMes(x.mes) : "-"}</td></tr>`; }).join("")}</tbody></table></details>` : ""; })()}
+      <td class="py-1 text-right tabular-nums">${d ? `$${pesos(d.venta / 1e6)}` : "-"}</td><td class="py-1 text-right tabular-nums">${d ? (d.caida > 0 ? `${fmt.num(d.caida * 100, 0)}%` : "ya está bajo") : "-"}</td></tr>`; }).join("")}</tbody></table></details>` : ""; })()}
   ${(() => { const M = G.red.filter(([id]) => enZona(id)); return M.length ? `<details class="mt-2 pt-2 border-t border-slate-100" ${APP._verMinima ? "open" : ""} id="red-minima">
     <summary class="tl-ano cursor-pointer"><span class="flex-1 text-left font-semibold">Red mínima: se mantienen</span><span class="w-20 text-right">${M.length} sede${M.length === 1 ? "" : "s"}</span></summary>
     <table class="w-full text-xs mt-1"><thead><tr class="text-slate-500"><th class="text-left font-semibold py-1">Sede</th><th class="text-right font-semibold py-1" title="Parte de sus clientes que habría que retener (en otras sedes o en el canal digital) para que cerrarla no destruya valor">Retención necesaria para cerrar</th><th class="text-right font-semibold py-1">Otra sede al alcance</th></tr></thead><tbody>
@@ -2552,7 +3196,7 @@ function pintarResumenTiempo() {
   ${G.externalizadas.filter(([id]) => enZona(id)).length ? `<p class="mt-2 pt-2 border-t border-slate-100 text-xs text-slate-600"><span class="font-semibold">Externalización decidida:</span> ${G.externalizadas.filter(([id]) => enZona(id)).map(([id]) => esc(nombreLindo(nombreNodo(id)))).join(", ")}</p>` : ""}
   ${G.renegociadas.filter(([id]) => enZona(id)).length ? `<p class="mt-2 pt-2 border-t border-slate-100 text-xs text-slate-600"><span class="font-semibold">Renegociación decidida:</span> ${G.renegociadas.filter(([id]) => enZona(id)).map(([id]) => esc(nombreLindo(nombreNodo(id)))).join(", ")}</p>` : ""}
   <details class="mt-2 text-[11px] text-slate-500"><summary class="cursor-pointer">Cómo se arma el plan</summary>
-    <p class="mt-1">Decididos: en su fecha. El resto cierra si su VAN es positivo en al menos la probabilidad mínima de los escenarios simulados (pestaña Simulación VAN), en la primera fecha cuyo VAN esperado está a menos del margen del máximo. Si no, queda en la red mínima. Los cierres de los primeros años son firmes; los posteriores, y las sedes de la red mínima con VAN positivo en al menos la mitad de los escenarios o con VAN cercano a cero (dentro del margen de seguimiento), quedan en seguimiento: cierran cuando su venta anual baja del disparador, y se revisan una vez al año. Para cada sede de la red mínima se indica cuánto tendría que subir su venta para que una mejora con la inversión de referencia se pague. VAN después de impuesto, a 10 años más valor terminal. Hasta 2036 la venta de cada sede sigue su tendencia histórica (persistencia configurable); después, la caída se amortigua, salvo en los alrededores de la RM y en regiones, donde la población envejece sin recambio y la caída no se frena.</p>
+    <p class="mt-1">Decididos: en su fecha. El resto cierra si su VAN es positivo en al menos la probabilidad mínima de los escenarios simulados (pestaña Simulación VAN), en la primera fecha cuyo VAN esperado está a menos del margen del máximo. Además, la matriz de portafolio debe ponerla en una categoría de salida. Si no, queda en la red mínima. Las sedes de la red mínima protegidas por el portafolio, con VAN positivo en al menos la mitad de los escenarios o con VAN cercano a cero (dentro del margen de seguimiento), quedan en seguimiento: cierran cuando su venta anual baja del disparador, y se revisan una vez al año. Para cada sede de la red mínima se indica cuánto tendría que subir su venta para que una mejora con la inversión de referencia se pague. VAN después de impuesto, a 10 años más valor terminal. Hasta 2036 la venta de cada sede sigue su tendencia histórica (persistencia configurable); después, la caída se amortigua, salvo en los alrededores de la RM y en regiones, donde la población envejece sin recambio y la caída no se frena.</p>
     <div class="grid grid-cols-3 gap-2 mt-2">
       <label class="fld">Inversión de referencia MM$<input type="number" id="mej-inv" step="10" min="0" value="${APP.mejora.inversion}"></label>
       <label class="fld">Impuesto %<input type="number" id="fin-imp" step="0.5" min="0" max="60" value="${fmt.num(finz().impuesto * 100, 1).replace(",", ".")}"></label>
@@ -2565,7 +3209,6 @@ function pintarResumenTiempo() {
       <label class="fld" title="Escenario: meta de clientes que un programa activo lleva al canal digital en sedes sin otra sede al alcance, ajustada por la dificultad digital de la comuna. 0 = sin programa">Programa digital: meta de retención %<input type="number" id="fin-metadig" step="5" min="0" max="90" value="${Math.round((finz().metaDigital ?? 0) * 100)}"></label>
       <label class="fld" title="Costo del programa de migración digital por sede, se suma al costo de salida">Costo del programa por sede MM$<input type="number" id="fin-costoprog" step="5" min="0" value="${finz().costoPrograma ?? 0}"></label>
       <label class="fld" title="Sedes de la red mínima cuyo VAN de cierre está a menos de este monto bajo cero también quedan en seguimiento">Margen de seguimiento MM$<input type="number" id="fin-margenseg" step="5" min="0" value="${finz().margenSeguimiento ?? 25}"></label>
-      <label class="fld" title="Los cierres que caen en estos primeros años del plan se deciden ahora; los posteriores quedan en seguimiento">Años de cierres firmes<input type="number" id="fin-firmes" step="1" min="1" max="10" value="${finz().anosFirmes ?? 3}"></label>
       <label class="fld" title="Cuánto de la tendencia de cada sede se mantiene de un año al siguiente hasta 2036. 100 = sigue la tendencia histórica">Persistencia de la tendencia %<input type="number" id="fin-amort" step="5" min="50" max="100" value="${Math.round(amortiguacion() * 100)}"></label>
     </div></details>`;
   $("red-cambios").querySelectorAll("[data-ano]").forEach((b) => (b.onclick = () => { const l = porAno[b.dataset.ano]; moverLinea(l.map(([, k]) => k.mes).sort()[0]); }));
@@ -2576,7 +3219,7 @@ function pintarResumenTiempo() {
   if ($("red-seguimiento")) $("red-seguimiento").querySelectorAll("[data-sel]").forEach((a) => (a.onclick = (e) => { e.preventDefault(); APP.sedeSel = a.dataset.sel; pintarRed(); }));
   if ($("red-seguimiento")) $("red-seguimiento").ontoggle = (e) => { APP._verSeg = e.target.open; };
   const fz = (id, k, f) => { const el = $(id); if (el) el.onchange = () => { APP.finanzas = { ...finz(), [k]: Math.max(k === "vidaUtil" ? 1 : 0, +el.value || 0) * f }; pintarRed(); }; };
-  fz("fin-imp", "impuesto", 0.01); fz("fin-firmes", "anosFirmes", 1); fz("fin-costoprog", "costoPrograma", 1); fz("fin-margenseg", "margenSeguimiento", 1); fz("fin-ct", "capitalTrabajo", 1); fz("fin-vida", "vidaUtil", 1);
+  fz("fin-imp", "impuesto", 0.01); fz("fin-costoprog", "costoPrograma", 1); fz("fin-margenseg", "margenSeguimiento", 1); fz("fin-ct", "capitalTrabajo", 1); fz("fin-vida", "vidaUtil", 1);
   const fzr = (id, k) => { const el = $(id); if (el) el.onchange = () => { APP.finanzas = { ...finz(), [k]: (+el.value || 0) / 100 }; pintarRed(); }; };
   fzr("fin-carr", "crecArriendo"); fzr("fin-cotr", "crecOtros"); fzr("fin-tol", "tolerancia"); fzr("fin-prob", "probMin"); fzr("fin-amort", "amortiguacion"); fzr("fin-metadig", "metaDigital");
   mej("mej-inv", "inversion", 1);
@@ -2881,6 +3524,7 @@ function onUmbralesScoreChange() {
 }
 
 function filtrarArquetipo(arq) {
+  APP._cruceEst = null;   // tarjeta y casilla del cruce no se combinan: una sola seleccion a la vez
   if (APP.filtroArquetipoActivo === arq) {
     APP.filtroArquetipoActivo = null;
   } else {
@@ -2897,10 +3541,15 @@ function filtrarTablaPortafolio() {
 function limpiarFiltrosPortafolio() {
   APP.filtroArquetipoActivo = null;
   APP.filtroTextoPortafolio = "";
+  APP._celdaEst = null;
+  APP._cruceEst = null;
   if ($("inpBuscarPortafolio")) $("inpBuscarPortafolio").value = "";
   pintarEstrategiaPortafolio();
 }
 
+// Cierres que el equipo agrega al plan por criterio propio (Id_Division): entran aunque no pasen las dos llaves, en la
+// fecha de mayor VAN de su contrato. Se completan con los Id_Division de cada caso.
+const CIERRES_EQUIPO = new Set([]);
 // ACCION "EXTERNALIZAR" de la gerencia: la sede pasa a un tercero, no se evalua su cierre
 const externaliza = (s) => /^EXTERNALIZ/i.test(String(s?.accion ?? "").trim());
 // ACCION "RENEGOCIADO": la renegociacion ya esta en los costos de la hoja; la sede se evalua como cualquier otra
@@ -3025,9 +3674,8 @@ function calcularPortafolioMCDA() {
     if (mt?.externaliza) { arquetipo = "EXTERNALIZAR"; accion = "Externalización decidida por la gerencia"; arqColor = "slate"; }
     else if (mt?.renegociada) { arquetipo = "RENEGOCIADA"; accion = "Arriendo renegociado por la gerencia: se mantiene"; arqColor = "slate"; }
     else if (k?.tipo === "decidido") { arquetipo = "DECIDIDO"; accion = `Cierre decidido · ${nombreMes(k.mes)}`; arqColor = "slate"; }
-    else if (k?.firme) { arquetipo = "CERRAR"; accion = `Cierra ${nombreMes(k.mes)} · ${textoVan(k)} · ${textoReparto(k)}`; arqColor = "rose"; }
-    // FORTALECER (antes red minima mejorada, sin uso) agrupa ahora los cierres condicionados y las sedes en seguimiento
-    else if (k) { arquetipo = "FORTALECER"; accion = `Condicionado: ${textoDisparador(k.disparador)}, se espera en ${nombreMes(k.mes)}`; arqColor = "amber"; }
+    else if (k) { arquetipo = "CERRAR"; accion = `Cierra ${nombreMes(k.mes)} · ${textoVan(k)} · ${textoReparto(k)}`; arqColor = "rose"; }
+    // FORTALECER (antes red minima mejorada, sin uso) agrupa ahora las sedes en seguimiento
     else if (mt?.protegida) { arquetipo = "FORTALECER"; accion = `En seguimiento: el VAN del cierre es positivo, pero el portafolio la protege (${pf?.categoria})`; arqColor = "amber"; }
     else if (mt?.seguimiento) { arquetipo = "FORTALECER"; accion = `En seguimiento: ${textoDisparador(mt.disparador)}`; arqColor = "amber"; }
     else if (mt?.sinDatos) { arquetipo = "REVISAR"; accion = "Sin datos de gastos: no se evalúa"; arqColor = "slate"; }
@@ -3070,123 +3718,193 @@ function calcularPortafolioMCDA() {
 // Grupos del plan: textos y estilos compartidos por la tabla, el filtro y la pestana Fecha de cierre
 const ETIQUETA_ARQ = {
   DECIDIDO:    { txt: "Cierre decidido",     clase: "bg-[#F3F4F6] text-[#1F2937] border-[#D1D5DB]" },
-  FORTALECER:  { txt: "Cierre condicionado", clase: "bg-[#FFF4ED] text-[#7C2D12] border-[#F7941D]" },
-  CERRAR:      { txt: "Cierre firme",        clase: "bg-[#FDF3D1] text-[#C2410C] border-[#D99A00]" },
+  FORTALECER:  { txt: "En seguimiento",      clase: "bg-[#FFF4ED] text-[#7C2D12] border-[#F7941D]" },
+  CERRAR:      { txt: "Cierre del plan",     clase: "bg-[#FDF3D1] text-[#C2410C] border-[#D99A00]" },
   EXTERNALIZAR: { txt: "Externalización",   clase: "bg-[#F3F4F6] text-[#1F2937] border-[#D1D5DB]" },
   RENEGOCIADA:  { txt: "Renegociada",        clase: "bg-[#F3F4F6] text-[#1F2937] border-[#D1D5DB]" },
   TRANSFORMAR: { txt: "Red mínima",          clase: "bg-[#F1F5F9] text-[#496276] border-[#CBD5E1]" },
   OTRO:        { txt: "Otro hipódromo",      clase: "bg-white text-slate-500 border-slate-200" },
   REVISAR:     { txt: "Por revisar",         clase: "bg-white text-slate-500 border-slate-200" },
 };
+// Pestana Estrategia: grupos del plan, matriz de portafolio (segunda llave) y una fila por sede con las dos llaves a la vista.
+// Solo muestra el plan, no lo cambia (salvo los pesos y cortes del score, que son la segunda llave).
+const CHECK = `<svg class="inline w-3 h-3 -mt-0.5" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 6.5l2.5 2.5L10 3"/></svg>`;
+const CAT_CORTA = { "Salida / renegociación": "Salida", "Reestructurar / validar salida": "Reestructurar", "Optimizar / evaluar salida": "Evaluar salida",
+  "Revisión prioritaria": "Revisar", "Proteger / monitorear": "Proteger", "Optimizar": "Optimizar", "Proteger / expandir": "Expandir",
+  "Mantener / expansión condicionada": "Mantener", "Mantener; revisar contrato": "Revisar contrato" };
+const GRUPO_EST = { CERRAR: "Cierre", FORTALECER: "Seguimiento", TRANSFORMAR: "Red mínima", DECIDIDO: "Decidido", EXTERNALIZAR: "Externaliza",
+  RENEGOCIADA: "Renegociada", REVISAR: "Sin datos", OTRO: "Otro" };
+const grupoEst = (a) => (a === "EXTERNALIZAR" || a === "REVISAR" || a === "RENEGOCIADA" || a === "OTRO" ? "FUERA" : a);
+// VAN de los cierres decididos (la herramienta no los evalua para decidir, solo como referencia)
+function vanDecididos() {
+  const cal = calendarioCierres(), clave = APP._calMemo.clave;
+  if (APP._vanDec?.clave === clave && APP._vanDec.est === APP.est) return APP._vanDec.v;
+  const inicio = sumarMeses(historia().corte, 1), v = {};
+  for (const [id, k] of Object.entries(cal)) {
+    const s = APP._porId?.[id];
+    if (k.tipo !== "decidido" || !s || !DASHBOARD_DATA.locales[id] || sinGastos(s)) continue;
+    const rec = conUso(DASHBOARD_DATA.huff_ids.filter((j) => j !== id && !(cal[j] && cal[j].mes <= k.mes)), id, k.mes, APP._calMemo.libro);
+    v[id] = vanDesdeBase(baseCierre(s, rec, inicio, new Set()), [k.mes]).opciones[0].van;
+  }
+  APP._vanDec = { clave, est: APP.est, v };
+  return v;
+}
+// VAN de mantener y de cerrar cada sede (la diferencia es el VAN del cierre): en su fecha del plan, o en su mejor fecha si no
+// cierra, con las mismas receptoras que usa el calendario
+function vanEscenarios() {
+  const cal = calendarioCierres(), clave = APP._calMemo.clave;
+  if (APP._vanEsc?.clave === clave && APP._vanEsc.est === APP.est) return APP._vanEsc.v;
+  const inicio = sumarMeses(historia().corte, 1), fin = finPlan(), lib = APP._calMemo.libro, v = {};
+  for (const s of APP.est.sedes) {
+    const id = s.sede_id, k = cal[id], mt = APP._calMemo.mantiene[id], mes = k?.mes || mt?.mes;
+    if (!mes || !DASHBOARD_DATA.locales[id] || sinGastos(s)) continue;
+    const t = k ? k.mes : fin, rec = conUso(DASHBOARD_DATA.huff_ids.filter((j) => j !== id && !(cal[j] && cal[j].mes <= t)), id, t, lib);
+    const E = escenariosSede(s, rec, inicio, new Set(), [mes]);
+    v[id] = { mantener: E.mantener.van, cerrar: E.cerrar[0].van };
+  }
+  APP._vanEsc = { clave, est: APP.est, v };
+  return v;
+}
+function filasEstrategia(data) {
+  const cal = calendarioCierres(), PF = portafolioBase(), vd = vanDecididos(), ve = vanEscenarios();
+  return data.locales.map((l) => {
+    const k = cal[l.id], mt = mantieneDe(l.id), pf = PF[l.id] || {};
+    const van = k?.tipo === "decidido" ? vd[l.id] ?? null : k ? k.van : mt?.van ?? null;
+    const prob = k?.tipo === "decidido" ? null : k ? k.mc?.prob ?? null : mt?.mc?.prob ?? null;
+    return { ...l, pf, k, van, prob, mes: k?.mes || null, vMant: van != null ? ve[l.id]?.mantener ?? null : null, vCerr: van != null ? ve[l.id]?.cerrar ?? null : null, grupo: grupoEst(l.arquetipo), equipo: !!k && k.tipo !== "decidido" && CIERRES_EQUIPO.has(l.id) };
+  });
+}
 function pintarEstrategiaPortafolio() {
   if (APP.tab !== "segmentos") return;
+  if (document.body.classList.contains("presentacion")) { pintarEstPres(); return; }
   const data = calcularPortafolioMCDA();
   if (!data) return;
-
-  // Actualizar KPIs principales
   $("kpiPortafolioTotal").textContent = data.total;
-  $("kpiPortafolioAlto").textContent = data.altos;
-  $("kpiPortafolioMedio").textContent = data.medios;
-  $("kpiPortafolioBajo").textContent = data.bajos;
-  $("kpiPortafolioZonaGris").textContent = data.zonaGris;
-
-  // Contadores de los 4 arquetipos
-  $("cntArqFortalecer").textContent = data.cntFortalecer;
-  $("cntArqTransformar").textContent = data.cntTransformar;
-  $("cntArqCerrar").textContent = data.cntCerrar;
-  $("cntArqDecidido").textContent = data.cntDecidido;
-
-  // Actualizar estados visuales de las tarjetas de arquetipos
-  const f = APP.filtroArquetipoActivo;
-  ["Fortalecer", "Transformar", "Cerrar", "Decidido"].forEach(k => {
-    const card = $("cardArq" + k);
-    if (card) {
-      const match = (f === k.toUpperCase());
-      card.classList.toggle("ring-2", match);
-      card.classList.toggle("ring-slate-800", match);
-      card.classList.toggle("bg-slate-50/80", match);
-    }
-  });
-
-  $("txtFiltroArquetipoActivo").textContent = f ? `Solo: ${ETIQUETA_ARQ[f]?.txt || f}` : "Todas las sedes";
-
-  // Renderizar tabla
+  const F = filasEstrategia(data), G = gruposPlan(), suma = (l) => l.reduce((a, x) => a + (x.van || 0), 0), f = APP.filtroArquetipoActivo;
+  const de = (g) => F.filter((x) => x.grupo === g);
+  const tarjetas = [
+    ["CERRAR", "Cierran por el plan", de("CERRAR").length, `VAN ${textoMM(suma(de("CERRAR")))}`, "#C2410C"],
+    ["DECIDIDO", "Cierran por decisión de la gerencia", de("DECIDIDO").length, `VAN ${textoMM(suma(de("DECIDIDO")))}`, "#1F2937"],
+    ["FORTALECER", "No cierran, en seguimiento", de("FORTALECER").length, "se revisan cada año", "#7C2D12"],
+    ["TRANSFORMAR", "No cierran, red mínima", de("TRANSFORMAR").length, "cerrarlas no conviene", "#496276"],
+    ["FUERA", "Fuera del análisis", de("FUERA").length, de("FUERA").map((x) => nombreLindo(x.nombre)).join(", "), "#94A3B8"],
+  ];
+  $("est-tarjetas").innerHTML = tarjetas.map(([g, t, n, sub, col]) => `<button type="button" onclick="filtrarArquetipo('${g}')"
+    class="card !p-3 text-left border-l-4 hover:shadow-md transition-shadow ${f === g ? "ring-2 ring-slate-800" : ""}" style="border-left-color:${col}">
+    <div class="text-[11px] font-bold uppercase tracking-wide" style="color:${col}">${t}</div>
+    <div class="text-2xl font-extrabold text-slate-900 tabular-nums">${n}</div>
+    <div class="text-[11px] text-slate-500 truncate" title="${esc(sub)}">${esc(sub) || "&nbsp;"}</div></button>`).join("");
+  // Cruce de las dos condiciones del plan: cerrar crea valor (VAN positivo en probMin de los escenarios) y rinde poco frente
+  // a la red (categoria de salida de la matriz). Solo sedes evaluadas: sin decididos ni fuera del analisis
+  const pm = probMin(), ev = F.filter((x) => x.grupo !== "DECIDIDO" && x.grupo !== "FUERA");
+  const crea = (x) => x.van > 0 && x.prob != null && x.prob >= pm, poco = (x) => CATEGORIAS_SALIDA.has(x.pf.categoria);
+  const cruce = APP._cruceEst, NOMG = { CERRAR: ["cierra", "cierran"], FORTALECER: ["en seguimiento", "en seguimiento"], TRANSFORMAR: ["red mínima", "red mínima"] };
+  const caja = (c, v, p) => {
+    const l = ev.filter((x) => crea(x) === v && poco(x) === p), on = cruce === c;
+    const cierran = l.filter((x) => x.grupo === "CERRAR"), seg = l.filter((x) => x.grupo === "FORTALECER"), red = l.filter((x) => x.grupo === "TRANSFORMAR");
+    const nom = (g) => esc(g.map((x) => nombreLindo(x.nombre)).join(", "));
+    const resto = seg.length + red.length;
+    const detResto = seg.length && red.length ? `${seg.length} en seguimiento y ${red.length} en red mínima` : seg.length ? "en seguimiento" : "en red mínima";
+    return `<button type="button" data-cruce="${c}" class="w-full h-full min-h-[88px] text-left rounded-xl border px-4 py-3 transition-shadow hover:shadow-sm ${v && p ? "bg-[#FFF4ED] border-[#F7941D]" : "bg-slate-50 border-slate-200"} ${on ? "ring-2 ring-slate-800" : ""}">
+      ${cierran.length ? `<div class="text-xs"><span class="font-extrabold text-[#C2410C]">Cierran ${cierran.length}</span><div class="text-[11px] text-slate-700 leading-snug mt-0.5">${nom(cierran)}</div></div>` : ""}
+      ${resto ? `<div class="text-xs ${cierran.length ? "mt-2" : ""}"><span class="font-extrabold text-slate-600">No cierran ${resto}</span> <span class="text-slate-500">${detResto}</span>${resto <= 8 ? `<div class="text-[11px] text-slate-500 leading-snug mt-0.5">${nom([...seg, ...red])}</div>` : ""}</div>` : ""}
+      ${l.length ? "" : `<span class="text-slate-300">-</span>`}</button>`;
+  };
+  const fila = (t, a, b) => `<div class="text-xs font-semibold text-slate-600 self-center">${t}</div>${a}${b}`;
+  $("est-cruce").innerHTML = `<div class="grid grid-cols-[120px_1fr_1fr] gap-2 min-w-[600px]">
+    <div></div><div class="text-xs font-semibold text-slate-600 px-1">Rinde poco frente a la red</div><div class="text-xs font-semibold text-slate-600 px-1">Rinde bien frente a la red</div>
+    ${fila("Cerrarla crea valor", caja("sv", true, true), caja("sp", true, false))}
+    ${fila("Cerrarla no crea valor", caja("nv", false, true), caja("np", false, false))}</div>`;
+  $("est-cruce").querySelectorAll("[data-cruce]").forEach((b) => (b.onclick = () => { APP._cruceEst = APP._cruceEst === b.dataset.cruce ? null : b.dataset.cruce; APP.filtroArquetipoActivo = null; pintarEstrategiaPortafolio(); }));
+  const PF = portafolioBase(), u = APP.umbralesScore || { alto: 65, bajo: 45 }, p = APP.pesosScore || { vol: 0.35, efic: 0.40, tend: 0.25 };
+  const celda = APP._celdaEst, niveles = [["Alto", `Score alto, ${u.alto} o más`], ["Medio", `Score medio, ${u.bajo} a ${u.alto}`], ["Bajo", `Score bajo, menos de ${u.bajo}`]];
+  const mats = [["Baja", "Margen bajo"], ["Media", "Margen medio"], ["Alta", "Margen alto"]];
+  const pc = (x) => Math.round(x * 100);
+  $("est-formula").textContent = `Cada sede recibe un score de 0 a 100 que la compara con el resto de la red. Score = ${pc(p.vol)}% volumen (venta mensual) + ${pc(p.efic)}% arriendo (arriendo mensual / venta mensual, menor es mejor) + ${pc(p.tend)}% tendencia de la venta en 12 meses. Una sede rinde poco si su score es bajo (menos de ${u.bajo}) y su margen anual está bajo la mediana de la red, o si su score es medio (${u.bajo} a ${u.alto}) y su margen está en el tercio más bajo de la red.`;
+  const filtros = [f ? tarjetas.find(([g]) => g === f)?.[1] : null, celda ? `${niveles.find(([n]) => n === celda.split("|")[0])[1]}, ${mats.find(([m]) => m === celda.split("|")[1])[1].toLowerCase()}` : null,
+    APP._cruceEst ? { sv: "cerrar crea valor y rinde poco", sp: "cerrar crea valor y rinde bien", nv: "cerrar no crea valor y rinde poco", np: "cerrar no crea valor y rinde bien" }[APP._cruceEst] : null].filter(Boolean);
+  $("txtFiltroArquetipoActivo").textContent = filtros.length ? `Solo ${filtros.join(" y ")}` : "";
+  APP._filasEst = F;
   renderTablaPortafolio(data);
 }
-
+// Ficha de una sede en Estrategia: las cifras que explican por que cierra o no
+function explicacionSede(x) {
+  const s = APP._porId[x.id], k = x.k, mt = mantieneDe(x.id), pf = x.pf, pm = probMin();
+  const mm = (v) => (v == null ? "-" : `${v < 0 ? "−" : ""}$${fmt.num(Math.abs(v), 0)} M`), pc = (v, d = 1) => (v == null ? "-" : `${fmt.num(v * 100, d)}%`);
+  const titulo = x.grupo === "CERRAR" ? "Cierra por el plan" : x.grupo === "DECIDIDO" ? "Cierra por decisión de la gerencia"
+    : x.grupo === "FORTALECER" ? "No cierra, en seguimiento" : x.grupo === "TRANSFORMAR" ? "No cierra, red mínima" : "No se evalúa";
+  const crea = x.van > 0 && x.prob != null && x.prob >= pm, poco = CATEGORIAS_SALIDA.has(pf.categoria);
+  const motivo = x.grupo === "FUERA" ? (mt?.externaliza ? "Externalización decidida" : "Sin gastos en la hoja") : x.grupo === "DECIDIDO" ? "Decisión de la gerencia"
+    : x.grupo === "CERRAR" && !(crea && poco) ? null : `${crea ? "Crea valor" : "No crea valor"} y ${poco ? "rinde poco" : "rinde bien"}`;
+  const C = motivo ? [["Motivo", motivo]] : [];
+  if (x.grupo !== "FUERA") {
+    const venc = mes7(s.vencimiento_contrato), mes = x.mes || mt?.mes;
+    const cal = calendarioCierres(), t = k ? k.mes : finPlan();
+    const rec = conUso(DASHBOARD_DATA.huff_ids.filter((j) => j !== x.id && !(cal[j] && cal[j].mes <= t)), x.id, t, APP._calMemo.libro);
+    const B = baseCierre(s, rec, sumarMeses(historia().corte, 1), new Set()), fis = B.e.physProb, dig = (1 - fis) * B.md;
+    const top = Object.entries(B.e.absorcion || {}).filter(([, f]) => f >= 0.001).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([j, f]) => `${nombreLindo(APP._porId[j]?.nombre ?? j)} ${pc(f)}`).join(", ");
+    const vta = (s.venta_12m_real || 0) / 1e6;
+    C.push(["Fecha de cierre", mes ? `${nombreMes(mes)}${x.mes ? "" : ", mejor fecha posible"}` : "-"],
+      ["VAN mantener y cerrar", `${mm(x.vMant)} y ${mm(x.vCerr)}`],
+      ["VAN del cierre", `${mm(x.van)}`],
+      ["Escenarios con VAN positivo", x.prob != null ? `${pc(x.prob, 0)}, mínimo ${pc(pm, 0)}${crea ? " [ok]" : ""}` : "-"],
+      ["Venta últimos 12 meses", `$${fmt.num(vta, 0)} M`],
+      ["Arriendo sobre venta", vta > 0 ? pc((s.arriendo_mensual_clp || 0) * 12 / 1e6 / vta) : "-"],
+      ["Tendencia 12 meses", `${(s.crecimiento_anual_pct ?? 0) > 0 ? "+" : ""}${fmt.num(s.crecimiento_anual_pct ?? 0, 1)}%`],
+      ["Margen anual", `${mm(pf.margen)}, tercio ${pf.materialidad === "Alta" ? "alto" : pf.materialidad === "Media" ? "medio" : "bajo"}`],
+      ["Percentil volumen, arriendo y tendencia", `${Math.round(pf.pctVol)}, ${Math.round(pf.pctEfic)} y ${Math.round(pf.pctTend)}`],
+      ["Score", `${fmt.num(pf.scoreBase, 0)}, ${pf.nivel.toLowerCase()}, ${CAT_CORTA[pf.categoria] || pf.categoria}${poco ? " [ok]" : ""}`],
+      ["Clientes a otras sedes", `${pc(fis)}${top ? ` (${top})` : ""}`],
+      ["Clientes al canal digital", pc(dig)],
+      ["Clientes que se pierden", pc(1 - fis - dig)],
+      ["Contrato", `${venc ? `vence ${nombreMes(venc)}` : "sin fecha"}${s.accion ? `, ${String(s.accion).trim()}` : ""}${s.status ? `, ${String(s.status).trim()}` : ""}`]);
+  }
+  return `<div class="rounded-lg border border-slate-200 bg-white p-3 text-xs" style="position:sticky;left:0;max-width:min(920px,calc(100vw - 120px))">
+    <div class="flex items-center justify-between gap-3 mb-2"><span class="font-extrabold text-slate-900">${titulo}</span>
+      <button type="button" class="btn-s !text-[11px]" onclick="event.stopPropagation(); verEnCierreOptimo('${x.id}')">Ver detalle por sucursal</button></div>
+    <dl class="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1">${C.map(([k2, v]) => `<div class="flex justify-between gap-3 border-b border-slate-100 py-0.5"><dt class="text-slate-500">${k2}</dt><dd class="font-semibold text-slate-800 text-right tabular-nums">${esc(v).replace(/ \[ok\]/g, ` <span class="text-emerald-700">${CHECK}</span>`)}</dd></div>`).join("")}</dl></div>`;
+}
 function renderTablaPortafolio(data) {
   const cont = $("portafolio-tabla-container");
   if (!cont || !data) return;
-
-  let filtrados = data.locales || [];
-
-  // Filtro por arquetipo
-  if (APP.filtroArquetipoActivo) {
-    filtrados = filtrados.filter(l => l.arquetipo === APP.filtroArquetipoActivo);
+  let F = APP._filasEst || filasEstrategia(data);
+  const f = APP.filtroArquetipoActivo, celda = APP._celdaEst, q = (APP.filtroTextoPortafolio || "").toLowerCase();
+  if (f) F = F.filter((x) => x.grupo === f);
+  if (celda) { const [n, m] = celda.split("|"); F = F.filter((x) => x.pf.nivel === n && x.pf.materialidad === m); }
+  if (APP._cruceEst) {
+    const pmC = probMin(), [v, p] = [APP._cruceEst[0] === "s", APP._cruceEst[1] === "v"];
+    F = F.filter((x) => x.grupo !== "DECIDIDO" && x.grupo !== "FUERA" && (x.van > 0 && x.prob != null && x.prob >= pmC) === v && CATEGORIAS_SALIDA.has(x.pf.categoria) === p);
   }
-
-  // Filtro por texto
-  if (APP.filtroTextoPortafolio) {
-    const q = APP.filtroTextoPortafolio.toLowerCase();
-    filtrados = filtrados.filter(l => (l.nombre || "").toLowerCase().includes(q) || (l.id || "").toLowerCase().includes(q) || (l.zona || "").toLowerCase().includes(q));
-  }
-
-  const orden = { DECIDIDO: 0, EXTERNALIZAR: 0, RENEGOCIADA: 0, CERRAR: 1, FORTALECER: 2, TRANSFORMAR: 3, OTRO: 4, REVISAR: 5 }, mes = (l) => calendarioCierres()[l.id]?.mes || "9999";
-  filtrados.sort((a, b) => orden[a.arquetipo] - orden[b.arquetipo] || (mes(a) < mes(b) ? -1 : mes(a) > mes(b) ? 1 : b.scoreBase - a.scoreBase));
-
-  const rows = filtrados.map(l => {
-    const sano = (l.rentaPct || 0) <= 0.04;
-    const etiquetaArriendo = sano
-      ? `<span class="inline-block px-1.5 py-0.5 rounded text-[10px] font-bold bg-[#E8EEF5] text-[#003058] border border-[#D1DCE8]">Sano</span>`
-      : `<span class="inline-block px-1.5 py-0.5 rounded text-[10px] font-bold bg-[#FDF3D1] text-[#C2410C] border border-[#D99A00]">Elevado</span>`;
-
-    const sinAlt = sinAlternativa(l.s);
-    const textoDistancia = sinAlt
-      ? `<span class="text-[11px] text-[#9D174D] font-semibold">Sin alternativa</span>`
-      : `<span class="text-[11px] text-[#003058] font-semibold">Con alternativa</span>`;
-
-
-    const recLabel = esc(l.accion), recClass = ETIQUETA_ARQ[l.arquetipo]?.clase || ETIQUETA_ARQ.REVISAR.clase;
-
-    return `
-      <tr class="hover:bg-slate-50 transition-colors cursor-pointer" onclick="verEnCierreOptimo('${l.id}')">
-        <td class="py-2.5 px-3">
-          <div class="font-bold text-slate-800">${esc(l.nombre)}</div>
-          <div class="text-[10px] font-mono text-slate-400">${esc(l.id)}</div>
-        </td>
-        <td class="py-2.5 px-3 text-slate-600">${esc(l.zona)}</td>
-        <td class="py-2.5 px-3 text-right font-medium text-slate-700">$${(l.vtaMes || 0).toFixed(1)} M</td>
-        <td class="py-2.5 px-3 text-right">
-          <span class="font-medium ${sano ? 'text-slate-700' : 'text-[#C2410C] font-semibold'}">${((l.rentaPct || 0) * 100).toFixed(1)}%</span>
-          <span class="ml-1.5">${etiquetaArriendo}</span>
-        </td>
-        <td class="py-2.5 px-3 text-right">
-          ${textoDistancia}
-        </td>
-        <td class="py-2.5 px-3">
-          <span class="inline-block px-2.5 py-1 rounded-md text-[11px] font-bold border ${recClass}">${recLabel}</span>
-        </td>
-      </tr>
-    `;
+  if (q) F = F.filter((x) => nombreLindo(x.nombre).toLowerCase().includes(q) || (x.id || "").includes(q));
+  const orden = { CERRAR: 0, FORTALECER: 1, TRANSFORMAR: 2, DECIDIDO: 3, FUERA: 4 };
+  F = [...F].sort((a, b) => orden[a.grupo] - orden[b.grupo] || (a.grupo === "CERRAR" || a.grupo === "DECIDIDO" ? (a.mes < b.mes ? -1 : a.mes > b.mes ? 1 : 0) : (b.van ?? -1e9) - (a.van ?? -1e9)));
+  const ok = `<span class="text-emerald-700">${CHECK}</span>`, pm = probMin();
+  const barra = (v) => `<span class="inline-flex items-center gap-1.5"><span class="inline-block w-10 h-1.5 rounded-full bg-slate-200"><span class="block h-1.5 rounded-full bg-[#003058]" style="width:${Math.max(4, v)}%"></span></span><span class="tabular-nums text-slate-600 w-5 text-right">${Math.round(v)}</span></span>`;
+  const rows = F.map((x) => {
+    const dec = x.grupo === "DECIDIDO", fuera = x.grupo === "FUERA", sal = CATEGORIAS_SALIDA.has(x.pf.categoria);
+    const abierta = APP._expEst === x.id;
+    return `<tr class="hover:bg-slate-50 cursor-pointer ${abierta ? "bg-slate-50" : ""}" onclick="APP._expEst = APP._expEst === '${x.id}' ? null : '${x.id}'; renderTablaPortafolio(calcularPortafolioMCDA())">
+      <td class="py-2 px-3"><div class="font-semibold text-slate-800">${esc(nombreLindo(x.nombre))}</div><div class="text-[10px] font-mono text-slate-400">${esc(x.id)}</div></td>
+      <td class="py-2 px-3 whitespace-nowrap">${x.grupo === "CERRAR" || x.grupo === "DECIDIDO"
+        ? `<span class="inline-block px-2 py-0.5 rounded text-[11px] font-bold text-white ${x.grupo === "CERRAR" ? "bg-[#C2410C]" : "bg-[#1F2937]"}">Cierra</span><div class="text-[10px] text-slate-500 mt-0.5">${x.grupo === "CERRAR" ? "por el plan" : "decisión de la gerencia"}</div>`
+        : x.grupo === "FUERA" ? `<span class="inline-block px-2 py-0.5 rounded text-[11px] font-bold border border-slate-200 text-slate-400">No se evalúa</span><div class="text-[10px] text-slate-400 mt-0.5">${(GRUPO_EST[x.arquetipo] || "").toLowerCase()}</div>`
+        : `<span class="inline-block px-2 py-0.5 rounded text-[11px] font-bold border border-slate-300 text-slate-600">No cierra</span><div class="text-[10px] text-slate-500 mt-0.5">${x.grupo === "FORTALECER" ? "en seguimiento" : "red mínima"}</div>`}</td>
+      <td class="py-2 px-3 whitespace-nowrap text-slate-700">${x.mes ? nombreMes(x.mes) : "-"}</td>
+      ${[x.vMant, x.vCerr].map((v) => `<td class="py-2 px-3 text-right tabular-nums ${v < 0 ? "text-rose-700" : "text-slate-600"}">${v != null ? fmt.num(v, 0) : "-"}</td>`).join("")}
+      <td class="py-2 px-3 text-right tabular-nums ${x.van < 0 ? "text-rose-700" : "text-slate-800"} font-semibold">${x.van != null ? fmt.num(x.van, 0) : "-"}</td>
+      <td class="py-2 px-3 text-right tabular-nums whitespace-nowrap">${dec || fuera || x.prob == null ? "-" : `${fmt.num(x.prob * 100, 0)}% ${x.prob >= pm && x.van > 0 ? ok : "&nbsp;&nbsp;&nbsp;"}`}</td>
+      ${[x.pf.pctVol, x.pf.pctEfic, x.pf.pctTend].map((v) => `<td class="py-2 px-3 whitespace-nowrap">${x.pf.scoreBase != null ? barra(v) : ""}</td>`).join("")}
+      <td class="py-2 px-3 whitespace-nowrap ${dec || fuera ? "text-slate-400" : sal ? "text-[#C2410C] font-semibold" : "text-slate-600"}" title="${esc(x.pf.categoria || "")}">${x.pf.categoria ? (sal ? "Rinde poco" : "Rinde bien") : "-"}${!dec && !fuera && sal ? ` ${ok}` : ""}</td></tr>${abierta ? `<tr><td colspan="11" class="px-3 pb-3 pt-0 bg-slate-50">${explicacionSede(x)}</td></tr>` : ""}`;
   }).join("");
-
-  cont.innerHTML = `
-    <table class="w-full text-xs text-left border-collapse font-sans">
-      <thead>
-        <tr class="bg-slate-100 text-slate-700 font-bold border-b border-slate-300">
-          <th class="py-2.5 px-3">Sede</th>
-          <th class="py-2.5 px-3">Zona</th>
-          <th class="py-2.5 px-3 text-right">Venta Mensual</th>
-          <th class="py-2.5 px-3 text-right">Peso del Arriendo</th>
-          <th class="py-2.5 px-3 text-right">Otra sede cerca</th>
-          <th class="py-2.5 px-3">Plan</th>
-        </tr>
-      </thead>
-      <tbody class="divide-y divide-slate-100">
-        ${rows || `<tr><td colspan="6" class="p-4 text-center text-slate-400">No se encontraron sedes con los filtros seleccionados.</td></tr>`}
-      </tbody>
-    </table>
-  `;
+  const sumaC = (k) => F.reduce((s, x) => s + (x[k] ?? 0), 0), conV = F.filter((x) => x.van != null).length;
+  const celdaT = (v) => `<td class="py-2 px-3 text-right tabular-nums font-extrabold ${v < 0 ? "text-rose-700" : "text-slate-900"}">${fmt.num(v, 0)}</td>`;
+  const tot = (f || APP._cruceEst) && F.length ? `<tfoot><tr class="bg-slate-100 border-t-2 border-slate-300">
+      <td class="py-2 px-3 font-extrabold text-slate-900" colspan="3">Total ${F.length} sede${F.length === 1 ? "" : "s"}${conV < F.length ? `, ${conV} con VAN` : ""}</td>
+      ${conV ? [sumaC("vMant"), sumaC("vCerr"), sumaC("van")].map(celdaT).join("") : `<td colspan="3"></td>`}<td colspan="5"></td></tr></tfoot>` : "";
+  cont.innerHTML = `<table class="w-full text-xs text-left border-collapse"><thead><tr class="bg-slate-100 text-slate-700 font-bold border-b border-slate-300">
+      <th class="py-2 px-3">Sede</th><th class="py-2 px-3">Plan</th><th class="py-2 px-3">Fecha</th><th class="py-2 px-3 text-right whitespace-nowrap">VAN mantener</th><th class="py-2 px-3 text-right whitespace-nowrap">VAN cerrar</th><th class="py-2 px-3 text-right whitespace-nowrap">VAN del cierre</th>
+      <th class="py-2 px-3 text-right whitespace-nowrap">Cerrar crea valor</th><th class="py-2 px-3">Volumen</th><th class="py-2 px-3">Arriendo</th><th class="py-2 px-3">Tendencia</th><th class="py-2 px-3 whitespace-nowrap">Rinde frente a la red</th></tr></thead>
+    <tbody class="divide-y divide-slate-100">${rows || `<tr><td colspan="11" class="p-4 text-center text-slate-400">Sin sedes con estos filtros</td></tr>`}</tbody>${tot}</table>`;
 }
 
 function verEnCierreOptimo(sedeId) {
@@ -3478,29 +4196,6 @@ function calcularEstadoResultado() {
     };
   };
 
-  const openRecipients = DASHBOARD_DATA.red_ids.filter(id => !state.closedStores.has(id));
-
-  const huffProbs = {};
-  state.closedStores.forEach(closedId => {
-    let denom = state.u0;
-    let scores = {};
-    openRecipients.forEach(openId => {
-      const dist = (DASHBOARD_DATA.matriz_distancias[closedId] && DASHBOARD_DATA.matriz_distancias[closedId][openId]) || 5.0;
-      const distEff = Math.max(0.5, dist);
-      const att = atractivoHuff(openId);
-      const s = att * Math.pow(distEff, -state.lambda);
-      scores[openId] = s;
-      denom += s;
-    });
-    const leakProb = denom > 0 ? (state.u0 / denom) : 1.0;
-    huffProbs[closedId] = {
-      scores,
-      denom,
-      leakProb,
-      digProb: leakProb * tasaRetDigital,
-      lossProb: leakProb * (1 - tasaRetDigital)
-    };
-  });
 
   const resultadoPorAno = anos.map((ano, y) => {
     const facInfl = isNom ? Math.pow(1 + inflacion, y + 1) : 1.0;
@@ -3560,7 +4255,9 @@ function calcularEstadoResultado() {
       }
 
       if (fracs.closesInThisYear) {
-        costoCierreTotal += (cf.costoCierre * facInfl) / 1e6;
+        // Igual que el plan: el mayor entre el costo de cierre de la hoja y los meses de arriendo segun el contrato
+        const rp = retencionPlan(id);
+        costoCierreTotal += rp ? Math.max(rp.costoMM, mesesSalida(mapaSedes[id], rp.mes)[1] * rp.arrMM) * facInfl : (cf.costoCierre * facInfl) / 1e6;
       }
     });
 
@@ -3571,22 +4268,19 @@ function calcularEstadoResultado() {
       const closedLoc = DASHBOARD_DATA.locales[closedId];
       if (!closedLoc) return;
       const closedV = (isNom ? closedLoc.proy_anual_base.nom_p50[y] : closedLoc.proy_anual_base.real_p50[y]) || 0;
-      const hp = huffProbs[closedId];
-      if (!hp) return;
+      const rp = retencionPlan(closedId);
+      if (!rp) return;
 
       const fracsClosed = getClosureFractions(closedId, y);
       if (fracsClosed.fracClosed <= 0) return;
 
       const vEfectivaCerrada = closedV * fracsClosed.fracClosed;
 
+      // Igual que el plan: lo que absorben las receptoras abiertas en la fecha del cierre, al ingreso neto de la sede cerrada
       memberIds.forEach(recId => {
-        const fracsRec = getClosureFractions(recId, y);
-        if (fracsRec.fracClosed >= 1.0) return; // Si la receptora esta cerrada en este periodo, no captura
-        const sc = hp.scores[recId] || 0;
-        const p = hp.denom > 0 ? (sc / hp.denom) : 0;
-        const vCap = vEfectivaCerrada * p * (fracsRec.fracOpen > 0 ? fracsRec.fracOpen : 1.0);
+        const vCap = vEfectivaCerrada * (rp.absorcion[recId] || 0);
         ventaCapturaHuff += vCap;
-        comisionCapturaHuff += vCap * tasaSede(recId);
+        comisionCapturaHuff += vCap * tasaSede(closedId);
       });
     });
 
@@ -3600,12 +4294,12 @@ function calcularEstadoResultado() {
       const closedLoc = DASHBOARD_DATA.locales[closedId];
       if (!closedLoc) return;
       const closedV = (isNom ? closedLoc.proy_anual_base.nom_p50[y] : closedLoc.proy_anual_base.real_p50[y]) || 0;
-      const hp = huffProbs[closedId];
-      if (hp) {
+      const rp = retencionPlan(closedId);
+      if (rp) {
         const fracsClosed = getClosureFractions(closedId, y);
         if (fracsClosed.fracClosed > 0) {
-          ventaMigracionDigital += (closedV * fracsClosed.fracClosed) * hp.digProb;
-          comisionDigitalHCH += (closedV * fracsClosed.fracClosed) * hp.digProb * tasaSede(closedId);
+          ventaMigracionDigital += (closedV * fracsClosed.fracClosed) * rp.dig;
+          comisionDigitalHCH += (closedV * fracsClosed.fracClosed) * rp.dig * tasaSede(closedId);
         }
       }
     });
@@ -3616,8 +4310,8 @@ function calcularEstadoResultado() {
     const ventaFugaNeta = Math.max(0, ventaBaseTotal - ventaProyectoTotal);
 
     // Costo del cliente online vs presencial:
-    const intensidadCostoPresencial = ventaBaseTotal > 0 ? (fijosBaseTotal / ventaBaseTotal) : 0.08;
-    const costoOperacionalDigital = ventaMigracionDigital * (intensidadCostoPresencial * (APP.factorCostoOnline ?? 0.15));
+    // Igual que el plan: el canal online cuesta factorCostoOnline del ingreso que recibe
+    const costoOperacionalDigital = comisionMigracionDigital * (APP.factorCostoOnline ?? 0.15);
 
     const egresosProyectoTotal = fijosAbiertas + costoCierreTotal + costoOperacionalDigital;
     const ebitdaProyecto = comisionProyectoTotal - egresosProyectoTotal;
@@ -3869,12 +4563,12 @@ function kpisPlan() {
   const nAcuerdo = prop.filter((k) => requiereAcuerdo(k)).length;
   const dato = (k, v, sub = "") => `<div><dt class="text-slate-500">${k}</dt><dd class="font-semibold text-pizarra-900 mt-0.5 text-sm tabular-nums">${v}</dd>${sub ? `<dd class="text-[11px] text-slate-500">${sub}</dd>` : ""}</div>`;
   const G = gruposPlan(), vanDe = (l) => l.reduce((a, [, k]) => a + (k.van || 0), 0);
-  const anosF = G.firmes.map(([, k]) => +k.mes.slice(0, 4));
+  const anosF = G.plan.map(([, k]) => +k.mes.slice(0, 4));
   if ($("resumen-plan")) $("resumen-plan").className = "w-full grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-x-6 gap-y-3 text-xs";
   if ($("resumen-plan")) $("resumen-plan").innerHTML = [
     dato("Cierres decididos por la gerencia", nDec),
-    dato("Cierres firmes", G.firmes.length, `${anosF.length ? `${Math.min(...anosF)} a ${Math.max(...anosF)}, ` : ""}VAN ${textoMM(vanDe(G.firmes))}`),
-    dato("Cierres condicionados", G.condicionados.length + G.seguimiento.length, `${G.condicionados.length} con fecha estimada (VAN ${textoMM(vanDe(G.condicionados))}) y ${G.seguimiento.length} en seguimiento`),
+    dato("Cierres del plan", G.plan.length, `${anosF.length ? `${Math.min(...anosF)} a ${Math.max(...anosF)}, ` : ""}VAN ${textoMM(vanDe(G.plan))}`),
+    dato("En seguimiento", `${G.seguimiento.length} sedes`),
     dato("Red mínima", `${G.red.length} sedes`),
     dato("VAN del plan para Hipódromo Chile", textoMM(suma("HCH"))),
     dato("Para el Club Hípico", textoMM(suma("CHS")), nAcuerdo ? `${nAcuerdo} cierre${nAcuerdo === 1 ? "" : "s"} requiere${nAcuerdo === 1 ? "" : "n"} acuerdo` : ""),
@@ -3909,7 +4603,7 @@ function ordenarPestanaDemanda() {
       <dl class="w-full grid grid-cols-2 md:grid-cols-5 gap-x-6 gap-y-3 text-xs" id="resumen-plan"></dl>
     <div class="flex items-center gap-2"><span class="text-xs text-slate-500" id="escenario-manual" hidden>Escenario armado a mano</span>
     <div class="seg-esc" id="migracion-demanda" role="group" aria-label="Migración de clientes">
-      <button type="button" data-mig="modelo">Migración del modelo</button><button type="button" data-mig="conservadora">Supuesto HCH (30%)</button></div>
+      <button type="button" data-mig="modelo">Migración del modelo</button><button type="button" data-mig="conservadora">Supuesto HCH</button></div>
     <div class="seg-esc" id="escenario-demanda" role="group" aria-label="Escenario">
       <button type="button" data-esc="plan" aria-pressed="true">Con el plan</button><button type="button" data-esc="decididos" aria-pressed="false">Solo decididos</button><button type="button" data-esc="manual" aria-pressed="false">A mano</button></div></div>`;
   tab.prepend(sel);
@@ -3932,7 +4626,7 @@ function ordenarPestanaDemanda() {
   const fin = tarjeta(porTexto("h2", /Parámetros Financieros/)), dem = tarjeta(porTexto("h3", /Parámetros de Demanda/));
   if (cuerpo && (fin || dem)) {
     const caja = document.createElement("div");
-    caja.id = "ajustes-supuestos"; caja.className = "space-y-4 mb-6";
+    caja.id = "ajustes-supuestos"; caja.className = "space-y-4 mb-6"; caja.hidden = true;
     caja.innerHTML = `<h3 class="text-xs font-bold uppercase tracking-wider text-slate-600">Supuestos del modelo</h3>`;
     if (fin) caja.appendChild(fin);
     if (dem) caja.appendChild(dem);
@@ -3988,8 +4682,18 @@ function ordenarPestanaDemanda() {
   const calib = [...tab.querySelectorAll(":scope > details.card")].pop() || null;
   const flujos = plegar(tabla, "Flujos año a año", "respaldo para finanzas");
   if (flujos) {
-    flujos.open = true; tab.insertBefore(flujos, calib);
+    flujos.open = false; tab.insertBefore(flujos, calib);
     if (csv) { csv.classList.add("ml-3", "btn-s"); csv.addEventListener("click", (ev) => ev.stopPropagation()); flujos.querySelector("summary").appendChild(csv); }
+  }
+  // Modelo de demanda (grafico y tabla) y, aparte, el calculo del VAN paso a paso
+  const graf = tarjeta($("mainDemandChart"));
+  if (graf) {
+    const t = graf.querySelector("h2"); if (t) t.textContent = "Modelo de demanda";
+    const sub = t?.parentElement?.querySelector("p"); if (sub) sub.hidden = true;
+    const m = document.createElement("div"); m.id = "dem-modelo"; graf.appendChild(m);
+    const v = document.createElement("div"); v.className = "card";
+    v.innerHTML = `<h2 class="!mb-3 text-base font-extrabold text-pizarra-900">Cálculo del VAN</h2><div id="van-calc"></div>`;
+    graf.after(v);
   }
   // Respaldo historico de migracion: con 9 cierres la evidencia no es concluyente, no se muestra
   $("calibracion")?.closest("details")?.remove();
@@ -4129,33 +4833,26 @@ function pintarRespaldoVan() {
   }
   const mejor = opciones.length ? opciones.reduce((a, b) => (b.van > a.van ? b : a)) : null;
   const elegida = k ? k.mes : null;
-  const visibles = opciones.length > 14 ? opciones.filter((o, i) => i === 0 || o.mes === mejor?.mes || o.mes === k?.mes || o.mes.endsWith("-01")) : opciones;
-  // VAN por escenario, por componente (valor presente, 10 años más valor terminal)
-  const E = escenariosSede(s, receptoras, inicio, mejoradas, visibles.map((o) => o.mes));
-  const c = (v, b = "") => `<td class="py-1.5 px-3 text-right tabular-nums whitespace-nowrap ${b}">${Math.abs(v) < 0.5 ? "-" : mm(v)}</td>`;
-  const fila = (txt, x, plan, base) => `<tr class="border-b border-slate-100 ${plan ? "font-bold bg-slate-50" : ""}"><td class="py-1.5 pr-4 whitespace-nowrap">${txt}</td>
-    ${c(x.com)}${c(x.gas)}${c(x.rec)}${c(x.otro)}${c(x.ct)}${c(x.imp)}${c(x.van, "font-semibold")}
-    <td class="py-1.5 px-3 text-right tabular-nums whitespace-nowrap ${x.van - base > 0.5 ? "text-emerald-800" : x.van - base < -0.5 ? "text-rose-800" : ""}">${Math.abs(x.van - base) < 0.5 ? "-" : mm(x.van - base, true)}</td>
-    ${PERSPECTIVAS.map(([h]) => { const d = x.socio?.[h]; return d == null ? "<td></td>" : `<td class="py-1.5 px-3 text-right tabular-nums whitespace-nowrap ${d > 0.5 ? "text-emerald-800" : d < -0.5 ? "text-rose-800" : ""} ${h === HIPODROMO_CLIENTE ? "font-semibold" : ""}">${Math.abs(d) < 0.5 ? "-" : mm(d, true)}</td>`; }).join("")}
-    <td class="py-1.5 pl-3 text-slate-600">${plan ? "Plan" : ""}</td></tr>`;
-  let alt = `<table class="w-full text-xs"><thead><tr class="text-slate-500 border-b border-slate-200 align-bottom">
-    <th class="py-1.5 text-left font-semibold whitespace-nowrap">Escenario</th><th class="py-1.5 px-3 text-right font-semibold" title="Ingreso de los hipódromos por las apuestas en la sede">Ingreso</th>
-    <th class="py-1.5 px-3 text-right font-semibold">Gastos</th><th class="py-1.5 px-3 text-right font-semibold" title="Ingreso de los clientes que siguen apostando en otras sedes u online">Ingreso conservado</th>
-    <th class="py-1.5 px-3 text-right font-semibold">Inversión o cierre</th><th class="py-1.5 px-3 text-right font-semibold">Capital de trabajo</th>
-    <th class="py-1.5 px-3 text-right font-semibold">Impuesto (${fmt.num(finz().impuesto * 100, 1)}%)</th><th class="py-1.5 px-3 text-right font-semibold">VAN</th>
-    <th class="py-1.5 px-3 text-right font-semibold" title="Diferencia frente a mantenerla como está">Diferencia</th>
-    ${PERSPECTIVAS.map(([, n]) => `<th class="py-1.5 px-3 text-right font-semibold" title="Diferencia para ${n}">${n}</th>`).join("")}<th></th></tr></thead><tbody>`;
+  // VAN por escenario: mantenerla frente a cerrarla en la fecha del plan (o la mejor fecha), y su reparto entre socios
+  const mesesE = [...new Set([elegida, mejor?.mes].filter(Boolean))];
+  const E = escenariosSede(s, receptoras, inicio, mejoradas, mesesE);
   const base = E.mantener.van;
-  // Diferencia frente a mantenerla para cada socio (mismos escenarios, con el ingreso y los gastos de cada hipodromo)
   for (const [h] of PERSPECTIVAS) {
-    const Eh = escenariosSede(s, receptoras, inicio, mejoradas, visibles.map((o) => o.mes), h), bh = Eh.mantener.van;
-    (E.mantener.socio ??= {})[h] = 0; (E.mejora.socio ??= {})[h] = Eh.mejora.van - bh;
+    const Eh = escenariosSede(s, receptoras, inicio, mejoradas, mesesE, h), bh = Eh.mantener.van;
     Eh.cerrar.forEach((c, i) => { (E.cerrar[i].socio ??= {})[h] = c.van - bh; });
   }
-  if (k?.tipo !== "decidido") {
-    alt += fila("Mantener como está", E.mantener, !!mt && !mt.mejora, base);
-  } else alt += fila("Mantener como está", E.mantener, false, base);
-  for (const x of E.cerrar) alt += fila(`Cerrar en ${nombreMes(x.mes)}${k?.tipo === "decidido" ? " (decidido por la gerencia)" : ""}`, x, x.mes === elegida, base);
+  const colD = (d) => (d > 0.5 ? "text-emerald-800" : d < -0.5 ? "text-rose-800" : "");
+  const td = (v, cls = "", signo = false) => `<td class="py-2 px-3 text-right tabular-nums whitespace-nowrap ${cls}">${Math.abs(v) < 0.5 ? "-" : mm(v, signo)}</td>`;
+  let alt = `<table class="w-full text-sm"><thead><tr class="text-xs text-slate-500 border-b border-slate-200 align-bottom">
+    <th class="py-1.5 text-left font-semibold">Escenario</th><th class="py-1.5 px-3 text-right font-semibold">VAN</th>
+    <th class="py-1.5 px-3 text-right font-semibold">Valor de cerrar</th>
+    ${PERSPECTIVAS.map(([, n]) => `<th class="py-1.5 px-3 text-right font-semibold">${n}</th>`).join("")}</tr></thead><tbody>`;
+  alt += `<tr class="border-b border-slate-100 ${k ? "" : "font-bold bg-slate-50"}"><td class="py-2 pr-4">Sigue abierta</td>${td(base)}<td></td>${PERSPECTIVAS.map(() => "<td></td>").join("")}</tr>`;
+  for (const x of E.cerrar) {
+    const d = x.van - base, plan = x.mes === elegida;
+    alt += `<tr class="border-b border-slate-100 ${plan ? "font-bold bg-slate-50" : ""}"><td class="py-2 pr-4 whitespace-nowrap">Cierra en ${nombreMes(x.mes)}${!plan && x.mes === mejor?.mes ? " (mejor fecha)" : ""}</td>
+      ${td(x.van)}${td(d, colD(d), true)}${PERSPECTIVAS.map(([h]) => td(x.socio?.[h] ?? 0, colD(x.socio?.[h] ?? 0) + (h === HIPODROMO_CLIENTE ? " font-semibold" : ""), true)).join("")}</tr>`;
+  }
   $("det-alt").innerHTML = alt + "</tbody></table>";
   // Decision del plan y sus cifras clave, en una grilla de datos
   const dato = (k, val, grande = false, cls = "") => `<div><dt class="text-[11px] text-slate-500">${k}</dt>
@@ -4163,8 +4860,8 @@ function pintarRespaldoVan() {
   const colorV = (x) => (x > 0.5 ? "text-emerald-800" : x < -0.5 ? "text-rose-800" : "");
   const rx = k || mt;
   let decision, vanTxt = null, vanVal = 0;
-  if (k?.tipo === "decidido") { decision = `Cierre decidido · ${nombreMes(k.mes)}`; vanVal = opciones[0]?.van ?? 0; vanTxt = "Valor del cierre"; }
-  else if (k) { decision = k.firme ? `Cierre firme · ${nombreMes(k.mes)}` : `Cierre condicionado · se espera ${nombreMes(k.mes)}`; vanVal = k.van; vanTxt = "Valor del cierre"; }
+  if (k?.tipo === "decidido") { decision = `Cierre decidido en ${nombreMes(k.mes)}`; vanVal = opciones[0]?.van ?? 0; vanTxt = "Valor del cierre"; }
+  else if (k) { decision = `Cierra en ${nombreMes(k.mes)}`; vanVal = k.van; vanTxt = "Valor del cierre"; }
   else if (mt?.seguimiento) { decision = "En seguimiento"; vanVal = mejor?.van ?? 0; vanTxt = mejor ? `Valor de cerrarla en ${nombreMes(mejor.mes)}` : null; }
   else if (mt?.mejora) { decision = "Se mantiene con mejora"; vanVal = mt.vanMejora; vanTxt = "Valor de la mejora"; }
   else if (mt) { decision = "Se mantiene"; vanVal = mejor?.van ?? 0; vanTxt = mejor ? `Valor de cerrarla en ${nombreMes(mejor.mes)}` : null; }
@@ -4202,7 +4899,7 @@ function pintarRespaldoVan() {
     if (mesC) {
       const labs = ch.data.labels.map(String), clave = anual ? mesC.slice(0, 4) : mesC;
       let i = labs.indexOf(clave); if (i < 0) i = clave < labs[0] ? 0 : labs.length - 1;
-      ch.$lineaCierre = { i, texto: `${k?.tipo === "decidido" ? "Cierre decidido" : k?.firme ? "Cierre" : "Cierre estimado"} ${nombreMes(mesC)}` };
+      ch.$lineaCierre = { i, texto: `${k?.tipo === "decidido" ? "Cierre decidido" : "Cierre"} ${nombreMes(mesC)}` };
     } else ch.$lineaCierre = null;
     ch.update();
   }
@@ -4236,29 +4933,233 @@ function pintarRespaldoVan() {
   $("det-desglose").innerHTML = `<details><summary class="cursor-pointer text-xs font-semibold text-[#003058]">Flujos año a año de cerrarla en ${nombreMes(t)}, frente a mantenerla</summary>
     <div class="overflow-x-auto mt-2">${h}</tbody></table></div></details>`;
   const pc = (x, d = 0) => `${fmt.num(x * 100, d)}%`;
-  const mx = mixSede(s);
   const item = (k, v) => `<div><dt class="text-slate-500">${k}</dt><dd class="font-semibold text-pizarra-900 mt-0.5">${v}</dd></div>`;
   $("det-supuestos").innerHTML = [
-    item("Tasa de descuento", `${pc(APP.tasaDescuento ?? 0.105, 2)} nominal${state.currencyMode === "NOMINAL" ? "" : ` (${pc(D.rA, 2)} real)`}`),
-    item("Impuesto", pc(finz().impuesto, 1)),
-    item("Horizonte", `${DASHBOARD_DATA.anos_proy[0]}-${finA} más valor terminal`),
-    item("Regla del plan", `cierra si el VAN es positivo en al menos ${fmt.num(probMin() * 100, 0)}% de ${SIM.iteraciones} escenarios, en la primera fecha a menos de ${fmt.num((finz().tolerancia ?? 0) * 100, 0)}% del mayor VAN esperado`),
-    item("Tendencia de su venta", `${D.g >= 0 ? "+" : ""}${pc(D.g, 1)} al año${amortiguacion() < 1 ? `, amortiguándose (${fmt.num(amortiguacion(), 2)} por año)` : ""} hasta ${finA}; después se amortigua (${fmt.num(PHI_TERMINAL, 3)} por año)`),
-    item("Costo de salida", `${fmt.num(D.mesesSalida, 1)} meses de arriendo ($${pesos(D.costoBruto)}), ${mes7(s.vencimiento_contrato) && t < mes7(s.vencimiento_contrato) ? "antes de que venza el contrato" : "al vencer el contrato o sin contrato conocido"}`),
-    item("Ingreso neto de los hipódromos", `${pc(D.tasa, 1)} de la venta (ley menos comisión de ${pc(tasaComisionVenta(), 1)})`),
-    item("Apuestas por hipódromo", `Hipódromo Chile ${pc(mx.HCH)} · Club Hípico ${pc(mx.CHS)} · regiones ${pc((mx.VSC || 0) + (mx.CHC || 0))}`),
-    item("Gastos", `repartidos entre los hipódromos según sus apuestas · arriendo +${fmt.num(finz().crecArriendo * 100, 1)}% y otros +${fmt.num(finz().crecOtros * 100, 1)}% real al año`),
-    item("Capital de trabajo", `$${pesos(finz().capitalTrabajo)} por sede`),
-    item("Si cierra, sus clientes", `${pc(D.physProb)} a sus 3 sedes más cercanas (hasta ${pc(D.physFull)} con toda la red, con tope de 25% de la venta de cada una), ${pc(D.digProb)} al canal digital y ${pc(D.lossProb)} se pierden`),
-    item("Migración", APP.migracion === "conservadora" ? "supuesto de Hipódromo Chile (30% y 5%)" : "modelo Huff con tiempos de viaje"),
-    item("Mejora", `inversión de referencia $${pesos(APP.mejora.inversion)}, depreciada en ${finz().vidaUtil} años; no entra al plan`),
+    item("Si cierra, sus clientes", `${pc(D.physProb)} a otras sedes, ${pc(D.digProb)} online, ${pc(D.lossProb)} se pierden`),
+    item("Tendencia de su venta", `${D.g >= 0 ? "+" : ""}${pc(D.g, 1)} al año`),
+    item("Costo de salida", D.costoBruto ? `$${pesos(D.costoBruto)}` : "Sin costo"),
+    item("Ingreso neto de los hipódromos", `${pc(D.tasa, 1)} de la venta`),
   ].join("");
 }
 const _pintarCierreOptimo = pintarCierreOptimo;
 pintarCierreOptimo = function () { ordenarPestanaDetalle(); _pintarCierreOptimo(); try { pintarRespaldoVan(); } catch (err) { console.error(err); } };
+// Demanda y VAN del plan mes a mes, con los mismos flujos de cada cierre que dan el VAN del informe (millones)
+function flujosPlanMes() {
+  const clave = JSON.stringify([APP.migracion, state.currencyMode, APP.tasaDescuento, APP.finanzas]);
+  const cal = calendarioCierres();
+  if (APP._fpm && APP._fpm.memo === APP._calMemo && APP._fpm.clave === clave) return APP._fpm.v;
+  const libro = APP._calMemo.libro, inicio = sumarMeses(historia().corte, 1), tx = finz().impuesto;
+  const n = difMeses(inicio, finPlan()) + 1, meses = Array.from({ length: n }, (_, k) => sumarMeses(inicio, k));
+  const nuevo = () => ({ gas: new Float64Array(n), com: new Float64Array(n), recF: new Float64Array(n), recD: new Float64Array(n), costo: new Float64Array(n),
+    ct: new Float64Array(n), cierran: new Float64Array(n), otras: new Float64Array(n), online: new Float64Array(n), pierde: new Float64Array(n),
+    vt: { gas: 0, com: 0, recF: 0, recD: 0 }, n: 0 });
+  const por = { decidido: nuevo(), propuesto: nuevo() }, red = new Float64Array(n);
+  let d = null;
+  for (const [id, k] of Object.entries(cal)) {
+    const s = APP._porId[id], X = por[k.tipo];
+    if (!s || !X || !DASHBOARD_DATA.locales[id] || sinGastos(s)) continue;
+    const rec = conUso(DASHBOARD_DATA.huff_ids.filter((j) => j !== id && !(cal[j] && cal[j].mes <= k.mes)), id, k.mes, libro);
+    const B = baseCierre(s, rec, inicio, new Set()), F = flujosCierre(B), kt = Math.max(0, difMeses(inicio, k.mes)), tasa = B.e.tasaSedePropia || 1;
+    d = F.d; X.n++;
+    for (let i = kt; i < n; i++) {
+      X.gas[i] += F.gas[i]; X.com[i] += F.com[i]; X.recF[i] += F.recF[i]; X.recD[i] += F.recD[i];
+      const v = F.com[i] / tasa; X.cierran[i] += v; X.otras[i] += v * F.fis; X.online[i] += v * F.dig; X.pierde[i] += v * (1 - F.fis - F.dig);
+    }
+    if (kt < n) { X.costo[kt] += F.costo(k.mes); X.ct[kt] += finz().capitalTrabajo * B.parte; }
+    for (const c in X.vt) X.vt[c] += F.vt[c];
+  }
+  // Venta de la red sin cierres: las mismas proyecciones de cada sede fisica
+  for (const id of DASHBOARD_DATA.huff_ids) {
+    const s = APP._porId[id];
+    if (!s || !DASHBOARD_DATA.locales[id]) continue;
+    try {
+      const B = baseCierre(s, DASHBOARD_DATA.huff_ids.filter((j) => j !== id), inicio, new Set()), F = flujosCierre(B), tasa = B.e.tasaSedePropia || 1;
+      for (let i = 0; i < n; i++) red[i] += F.com[i] / tasa;
+      d ||= F.d;
+    } catch (err) { /* sede sin datos suficientes */ }
+  }
+  const v = { meses, d, tx, por, red };
+  APP._fpm = { memo: APP._calMemo, clave, v };
+  return v;
+}
+function sumarFlujos(lista, n) {
+  const z = { gas: new Float64Array(n), com: new Float64Array(n), recF: new Float64Array(n), recD: new Float64Array(n), costo: new Float64Array(n), ct: new Float64Array(n),
+    cierran: new Float64Array(n), otras: new Float64Array(n), online: new Float64Array(n), pierde: new Float64Array(n), vt: { gas: 0, com: 0, recF: 0, recD: 0 }, n: 0 };
+  for (const X of lista) {
+    for (const c of ["gas", "com", "recF", "recD", "costo", "ct", "cierran", "otras", "online", "pierde"]) for (let i = 0; i < n; i++) z[c][i] += X[c][i];
+    for (const c in z.vt) z.vt[c] += X.vt[c];
+    z.n += X.n;
+  }
+  return z;
+}
+const MM_CEL = (v, d = 0) => (Math.abs(v) < 0.05 ? "-" : `${v < 0 ? "-" : ""}${fmt.num(Math.abs(v), d)}`);
+function pintarModeloDemanda() {
+  const caja = $("dem-modelo");
+  if (!caja || !APP.est) return;
+  const P = flujosPlanMes(), n = P.meses.length, esc = escenarioActual() === "decididos" ? "decididos" : "plan";
+  const X = sumarFlujos(esc === "decididos" ? [P.por.decidido] : [P.por.decidido, P.por.propuesto], n);
+  const anos = [...new Set(P.meses.map((m) => m.slice(0, 4)))];
+  const porAno = (arr) => anos.map((a) => P.meses.reduce((t, m, i) => t + (m.startsWith(a) ? arr[i] : 0), 0));
+  const tot = (arr) => arr.reduce((a, b) => a + b, 0);
+  const conPlan = P.red.map((v, i) => v - X.pierde[i]);
+  const filas = [["Venta de la red sin cierres", P.red, "font-semibold"], ["Venta de las sedes que cierran", X.cierran.map((v) => -v), ""],
+    ["Va a otras sedes", X.otras, "pl-4"], ["Va online", X.online, "pl-4"], ["Se pierde", X.pierde.map((v) => -v), "pl-4"],
+    ["Venta con el plan", conPlan, "font-bold bg-slate-50"]];
+  const th = (t) => `<th class="py-1.5 px-2 text-right font-semibold whitespace-nowrap">${t}</th>`;
+  let h = `<table class="w-full text-xs tabla-calc"><thead><tr class="text-slate-500 border-b border-slate-200"><th class="py-1.5 text-left font-semibold">Millones de pesos</th>${anos.map(th).join("")}${th("Total")}</tr></thead><tbody>`;
+  for (const [lbl, arr, cls] of filas) {
+    const pa = porAno(arr);
+    h += `<tr class="border-b border-slate-100 ${cls.includes("pl-4") ? "" : cls}"><td class="py-1.5 pr-3 whitespace-nowrap ${cls.includes("pl-4") ? "pl-4 text-slate-600" : ""}">${lbl}</td>${pa.map((v) => `<td class="py-1.5 px-2 text-right tabular-nums">${MM_CEL(v)}</td>`).join("")}<td class="py-1.5 px-2 text-right tabular-nums font-semibold">${MM_CEL(tot(arr))}</td></tr>`;
+  }
+  const R = cmpMigracion(), vc = tot(X.cierran) || 1, pr = porAno(P.red), a1 = anos.findIndex((a) => P.meses.filter((m) => m.startsWith(a)).length === 12);
+  const g = a1 >= 0 && pr[a1] > 0 ? Math.pow(pr[pr.length - 1] / pr[a1], 1 / Math.max(1, pr.length - 1 - a1)) - 1 : 0;
+  const pc = (x) => `${fmt.num(x * 100, 0)}%`;
+  const dato = (k, v) => `<div><dt class="text-[11px] text-slate-500">${k}</dt><dd class="text-sm font-semibold text-pizarra-900 mt-0.5 tabular-nums">${v}</dd></div>`;
+  caja.innerHTML = `<div class="overflow-x-auto mt-4">${h}</tbody></table></div>
+    <dl class="grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-3 mt-4 pt-4 border-t border-slate-100">
+      ${dato("Tendencia de la red", `${g >= 0 ? "+" : ""}${fmt.num(g * 100, 1)}% al año`)}
+      ${dato("Va a otras sedes", `${pc(tot(X.otras) / vc)}${R ? `, supuesto ${pc(MIGRACION_CONSERVADORA.fisica)} en promedio de la red. Modelo ${pc(R.modelo.otras)}` : ", 3 más cercanas, tope 25%"}`)}
+      ${dato("Va online", `${pc(tot(X.online) / vc)}${R ? `. Modelo ${pc(R.modelo.online)}` : ", según conectividad de la comuna"}`)}
+      ${dato("Se pierde", `${pc(tot(X.pierde) / vc)}${R ? `. Modelo ${pc(R.modelo.pierde)}` : ""}`)}</dl>`;
+}
+function pintarCalculoVan() {
+  const caja = $("van-calc");
+  if (!caja || !APP.est) return;
+  const P = flujosPlanMes(), n = P.meses.length, tx = P.tx, alc = APP._vanAlc || "plan";
+  const X = sumarFlujos(alc === "plan" ? [P.por.propuesto] : alc === "decididos" ? [P.por.decidido] : [P.por.decidido, P.por.propuesto], n);
+  const anos = [...new Set(P.meses.map((m) => m.slice(0, 4)))];
+  const desde = APP._vanDesde && anos.includes(APP._vanDesde) ? APP._vanDesde : anos[0];
+  const hasta = APP._vanHasta && anos.includes(APP._vanHasta) && APP._vanHasta >= desde ? APP._vanHasta : anos[anos.length - 1];
+  const mensual = APP._vanT === "MONTHLY";
+  const idx = P.meses.map((m, i) => i).filter((i) => P.meses[i].slice(0, 4) >= desde && P.meses[i].slice(0, 4) <= hasta);
+  const cols = mensual ? idx.map((i) => ({ t: nombreMes(P.meses[i]), ii: [i] }))
+    : anos.filter((a) => a >= desde && a <= hasta).map((a) => ({ t: a, ii: idx.filter((i) => P.meses[i].startsWith(a)) }));
+  const conVT = hasta === anos[anos.length - 1];
+  const s = (arr, ii) => ii.reduce((t, i) => t + arr[i], 0), sd = (arr, ii) => ii.reduce((t, i) => t + arr[i] * P.d[i], 0);
+  const antes = (ii, f) => f(X.gas, ii) - f(X.com, ii) + f(X.recF, ii) + f(X.recD, ii) - f(X.costo, ii);
+  const vtAntes = X.vt.gas - X.vt.com + X.vt.recF + X.vt.recD;
+  const hayCT = X.ct.some((v) => Math.abs(v) > 1e-9);
+  const filas = [
+    ["Ahorro de gastos", (ii) => s(X.gas, ii), X.vt.gas],
+    ["Ingreso perdido", (ii) => -s(X.com, ii), -X.vt.com],
+    ["Recuperado en otras sedes", (ii) => s(X.recF, ii), X.vt.recF],
+    ["Recuperado online", (ii) => s(X.recD, ii), X.vt.recD],
+    ["Costo de salida", (ii) => -s(X.costo, ii), 0],
+    ["Flujo antes de impuesto", (ii) => antes(ii, s), vtAntes, "font-semibold border-t border-slate-300"],
+    [`Impuesto ${fmt.num(tx * 100, 0)}%`, (ii) => -tx * antes(ii, s), -tx * vtAntes],
+    ...(hayCT ? [["Capital de trabajo liberado", (ii) => s(X.ct, ii), 0]] : []),
+    ["Flujo después de impuesto", (ii) => (1 - tx) * antes(ii, s) + s(X.ct, ii), (1 - tx) * vtAntes, "font-semibold border-t border-slate-300"],
+    ["Factor de descuento", null, null, "text-slate-500"],
+    ["Valor presente", (ii) => (1 - tx) * antes(ii, sd) + sd(X.ct, ii), (1 - tx) * vtAntes, "font-bold bg-slate-50 border-t border-slate-300"],
+  ];
+  const fdesp = (ii) => (1 - tx) * antes(ii, s) + s(X.ct, ii), fvp = (ii) => (1 - tx) * antes(ii, sd) + sd(X.ct, ii);
+  const th = (t) => `<th class="py-1.5 px-2 text-right font-semibold whitespace-nowrap">${t}</th>`;
+  let h = `<table class="w-full text-xs tabla-calc"><thead><tr class="text-slate-500 border-b border-slate-200"><th class="py-1.5 text-left font-semibold sticky left-0 bg-white">Millones de pesos</th>${cols.map((c) => th(c.t)).join("")}${th("Total")}${conVT ? th("Valor terminal") : ""}</tr></thead><tbody>`;
+  for (const [lbl, f, vt, cls = ""] of filas) {
+    let celdas, total;
+    if (!f) {
+      celdas = cols.map((c) => { const a = fdesp(c.ii); return Math.abs(a) < 1e-6 ? "-" : fmt.num(fvp(c.ii) / a, 3); });
+      h += `<tr class="border-b border-slate-100 ${cls}"><td class="py-1.5 pr-3 whitespace-nowrap sticky left-0 bg-white">${lbl}</td>${celdas.map((v) => `<td class="py-1.5 px-2 text-right tabular-nums">${v}</td>`).join("")}<td></td>${conVT ? "<td></td>" : ""}</tr>`;
+      continue;
+    }
+    celdas = cols.map((c) => f(c.ii));
+    total = celdas.reduce((a, b) => a + b, 0);
+    h += `<tr class="border-b border-slate-100 ${cls}"><td class="py-1.5 pr-3 whitespace-nowrap sticky left-0 ${cls.includes("bg-slate-50") ? "bg-slate-50" : "bg-white"}">${lbl}</td>${celdas.map((v) => `<td class="py-1.5 px-2 text-right tabular-nums">${MM_CEL(v, 1)}</td>`).join("")}<td class="py-1.5 px-2 text-right tabular-nums font-semibold">${MM_CEL(total, 1)}</td>${conVT ? `<td class="py-1.5 px-2 text-right tabular-nums">${MM_CEL(vt, 1)}</td>` : ""}</tr>`;
+  }
+  const R = cmpMigracion(), vModelo = R ? (alc === "plan" ? R.modelo.vanPlan : alc === "decididos" ? R.modelo.vanDec : R.modelo.vanPlan + R.modelo.vanDec) : 0;
+  const todo = P.meses.map((_, i) => i), vanTot = fvp(todo) + (1 - tx) * vtAntes, vanVent = fvp(idx);
+  const dato = (k, v, grande) => `<div><dt class="text-[11px] text-slate-500">${k}</dt><dd class="${grande ? "text-lg font-extrabold" : "text-sm font-semibold"} text-pizarra-900 mt-0.5 tabular-nums">${v}</dd></div>`;
+  const opA = anos.map((a) => `<option value="${a}">${a}</option>`).join("");
+  const seg = (k, t) => `<button type="button" data-van-alc="${k}" aria-pressed="${alc === k}">${t}</button>`;
+  caja.innerHTML = `<div class="flex flex-wrap items-center gap-3 mb-4">
+      <div class="seg-esc" role="group" aria-label="Cierres">${seg("plan", `Plan (${P.por.propuesto.n})`)}${seg("decididos", `Decididos (${P.por.decidido.n})`)}${seg("todos", `Todos (${P.por.propuesto.n + P.por.decidido.n})`)}</div>
+      <label class="text-xs text-slate-600 flex items-center gap-1.5">Desde <select id="van-desde" class="border border-slate-300 rounded-lg px-2 py-1 text-xs">${opA}</select></label>
+      <label class="text-xs text-slate-600 flex items-center gap-1.5">Hasta <select id="van-hasta" class="border border-slate-300 rounded-lg px-2 py-1 text-xs">${opA}</select></label>
+      <div class="seg-esc" role="group" aria-label="Detalle"><button type="button" data-van-t="ANNUAL" aria-pressed="${!mensual}">Anual</button><button type="button" data-van-t="MONTHLY" aria-pressed="${mensual}">Mensual</button></div></div>
+    <div class="overflow-x-auto">${h}</tbody></table></div>
+    <dl class="grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-3 mt-4 pt-4 border-t border-slate-100">
+      ${dato(`Valor presente ${desde === hasta ? desde : `${desde} a ${hasta}`}`, MM_CEL(vanVent, 1), true)}
+      ${dato("Valor terminal", MM_CEL((1 - tx) * vtAntes, 1))}
+      ${dato(`VAN ${anos[0]} a ${anos[anos.length - 1]} más valor terminal`, MM_CEL(vanTot, 1), true)}
+      ${R ? dato("Con la migración del modelo", `${MM_CEL(vModelo, 1)}, diferencia ${vanTot - vModelo > 0.05 ? "+" : ""}${MM_CEL(vanTot - vModelo, 1)}`) : ""}</dl>
+    ${APP.migracion === "conservadora" ? `<div id="cmp-mig" class="mt-6 pt-4 border-t border-slate-200"></div>` : ""}`;
+  $("van-desde").value = desde; $("van-hasta").value = hasta;
+  $("van-desde").onchange = (e) => { APP._vanDesde = e.target.value; if (APP._vanHasta && APP._vanHasta < APP._vanDesde) APP._vanHasta = APP._vanDesde; pintarCalculoVan(); };
+  $("van-hasta").onchange = (e) => { APP._vanHasta = e.target.value; if (APP._vanDesde && APP._vanDesde > APP._vanHasta) APP._vanDesde = APP._vanHasta; pintarCalculoVan(); };
+  caja.querySelectorAll("[data-van-alc]").forEach((b) => (b.onclick = () => { APP._vanAlc = b.dataset.vanAlc; pintarCalculoVan(); }));
+  caja.querySelectorAll("[data-van-t]").forEach((b) => (b.onclick = () => { APP._vanT = b.dataset.vanT; pintarCalculoVan(); }));
+}
+// Modelo de migracion frente al supuesto de Hipodromo Chile (30% a otras sedes, 5% online): plan, VAN y cada cierre con uno y otro
+function resumenMigracion() {
+  const cal = calendarioCierres(), G = gruposPlan(), P = flujosPlanMes(), n = P.meses.length, tx = P.tx, inicio = sumarMeses(historia().corte, 1);
+  const T = P.meses.map((_, i) => i), s = (arr) => T.reduce((t, i) => t + arr[i], 0);
+  const van = (X) => T.reduce((t, i) => t + ((X.gas[i] - X.com[i] + X.recF[i] + X.recD[i] - X.costo[i]) * (1 - tx) + X.ct[i]) * P.d[i], 0) + (X.vt.gas - X.vt.com + X.vt.recF + X.vt.recD) * (1 - tx);
+  const X = sumarFlujos([P.por.decidido, P.por.propuesto], n), vc = s(X.cierran) || 1;
+  const sedes = {};
+  for (const [id, k] of Object.entries(cal)) {
+    const sd = APP._porId[id];
+    if (!sd || !DASHBOARD_DATA.locales[id] || sinGastos(sd) || !(k.tipo === "decidido" || k.tipo === "propuesto")) continue;
+    const rec = conUso(DASHBOARD_DATA.huff_ids.filter((j) => j !== id && !(cal[j] && cal[j].mes <= k.mes)), id, k.mes, APP._calMemo.libro);
+    const D = desgloseCierre(sd, rec, k.mes, inicio, new Set());
+    sedes[id] = { tipo: k.tipo, mes: k.mes, van: D.total, fis: D.physProb, dig: D.digProb };
+  }
+  return { otras: s(X.otras) / vc, online: s(X.online) / vc, pierde: s(X.pierde) / vc, vanPlan: van(P.por.propuesto), vanDec: van(P.por.decidido),
+    nPlan: G.plan.length, nSeg: G.seguimiento.length, nRed: G.red.length, sedes };
+}
+function compararMigracion() {
+  const orig = APP.migracion || "modelo", memoOrig = APP._calMemo, u0 = state.u0, rd = APP.retencionDigital;
+  const R = {};
+  for (const m of ["modelo", "conservadora"]) { aplicarMigracion(m, false); R[m] = resumenMigracion(); if (m === orig) R._memo = APP._calMemo; }
+  APP.migracion = orig; state.u0 = u0; APP.retencionDigital = rd; APP._calMemo = R._memo || memoOrig;
+  if (typeof sincronizarSupuestos === "function") sincronizarSupuestos();
+  delete R._memo;
+  APP._cmpMig = { memo: APP._calMemo, R };
+  return R;
+}
+const cmpMigracion = () => (APP.migracion === "conservadora" && APP._cmpMig?.memo === APP._calMemo && APP._calMemo ? APP._cmpMig.R : null);
+function pintarComparaMigracion() {
+  const caja = $("cmp-mig");
+  if (!caja) return;
+  const R = cmpMigracion();
+  if (!R) {
+    caja.innerHTML = `<p class="text-xs text-slate-500">Calculando el plan con la migración del modelo...</p>`;
+    setTimeout(() => { try { compararMigracion(); } catch (err) { console.error(err); } pintarModeloVan(); }, 30);
+    return;
+  }
+  const M = R.modelo, H = R.conservadora, pc = (x) => `${fmt.num(x * 100, 0)}%`, m1 = (x) => MM_CEL(x, 1), dif = (x) => `${x > 0.05 ? "+" : ""}${MM_CEL(x, 1)}`;
+  const col = (x) => (x > 0.05 ? "text-emerald-800" : x < -0.05 ? "text-rose-800" : "");
+  const th = (t, l = false) => `<th class="py-1.5 px-2 ${l ? "text-left" : "text-right"} font-semibold whitespace-nowrap">${t}</th>`;
+  const td = (v, c = "") => `<td class="py-1.5 px-2 text-right tabular-nums whitespace-nowrap ${c}">${v}</td>`;
+  const res = [["Venta que va a otras sedes", pc(M.otras), pc(H.otras), ""], ["Va online", pc(M.online), pc(H.online), ""], ["Se pierde", pc(M.pierde), pc(H.pierde), ""],
+    ["Sedes que cierra el plan", M.nPlan, H.nPlan, ""], ["En seguimiento", M.nSeg, H.nSeg, ""], ["Red mínima", M.nRed, H.nRed, ""],
+    ["VAN del plan", m1(M.vanPlan), m1(H.vanPlan), dif(H.vanPlan - M.vanPlan), H.vanPlan - M.vanPlan], ["VAN de los decididos", m1(M.vanDec), m1(H.vanDec), dif(H.vanDec - M.vanDec), H.vanDec - M.vanDec]];
+  let h = `<h3 class="text-sm font-extrabold text-pizarra-900 mb-2">Frente a la migración del modelo</h3><table class="w-full text-xs mb-5"><thead><tr class="text-slate-500 border-b border-slate-200">${th("", true)}${th("Modelo")}${th("Supuesto HCH")}${th("Diferencia")}</tr></thead><tbody>`;
+  for (const [l, a, b, d, x = 0] of res) h += `<tr class="border-b border-slate-100 ${l.startsWith("VAN") ? "font-semibold" : ""}"><td class="py-1.5 pr-3">${l}</td>${td(a)}${td(b)}${td(d, col(x))}</tr>`;
+  h += "</tbody></table>";
+  const ids = [...new Set([...Object.keys(M.sedes), ...Object.keys(H.sedes)])];
+  const fila = (id) => { const a = M.sedes[id], b = H.sedes[id]; return { id, a, b, d: (b?.van ?? 0) - (a?.van ?? 0) }; };
+  const filas = ids.map(fila).sort((x, y) => (x.a?.tipo === y.a?.tipo ? Math.abs(y.d) - Math.abs(x.d) : x.a?.tipo === "decidido" ? -1 : 1));
+  const mes = (x) => (x ? nombreMes(x.mes) : "No cierra");
+  h += `<div class="overflow-x-auto"><table class="w-full text-xs"><thead><tr class="text-slate-500 border-b border-slate-200 align-bottom">${th("Sede", true)}${th("", true)}
+    ${th("Otras sedes<br>modelo")}${th("Otras sedes<br>HCH")}${th("Online<br>modelo")}${th("Online<br>HCH")}${th("Fecha<br>modelo")}${th("Fecha<br>HCH")}${th("VAN<br>modelo")}${th("VAN<br>HCH")}${th("Diferencia")}</tr></thead><tbody>`;
+  for (const { id, a, b, d } of filas) {
+    const s = APP._porId[id], cambia = (a?.mes || "") !== (b?.mes || "");
+    h += `<tr class="border-b border-slate-100"><td class="py-1.5 pr-3 whitespace-nowrap">${esc(nombreLindo(s?.nombre || id))}</td><td class="py-1.5 pr-3 text-slate-500">${(a || b).tipo === "decidido" ? "Decidido" : "Plan"}</td>
+      ${td(a ? pc(a.fis) : "-")}${td(b ? pc(b.fis) : "-")}${td(a ? pc(a.dig) : "-")}${td(b ? pc(b.dig) : "-")}
+      ${td(mes(a), cambia ? "font-semibold text-[#C2410C]" : "")}${td(mes(b), cambia ? "font-semibold text-[#C2410C]" : "")}
+      ${td(a ? m1(a.van) : "-")}${td(b ? m1(b.van) : "-")}${td(dif(d), col(d) + " font-semibold")}</tr>`;
+  }
+  caja.innerHTML = h + `</tbody></table></div><p class="text-[11px] text-slate-500 mt-3">Millones de pesos. Supuesto HCH ${pc(MIGRACION_CONSERVADORA.fisica)} a otras sedes en promedio de la red y ${pc(MIGRACION_CONSERVADORA.digital)} online, con tope de 25% de la venta de cada sede que recibe.</p>`;
+}
+function pintarModeloVan() {
+  try { pintarModeloDemanda(); } catch (err) { console.error(err); }
+  try { pintarCalculoVan(); } catch (err) { console.error(err); }
+  try { pintarComparaMigracion(); } catch (err) { console.error(err); }
+}
 function pintarResultado() {
   pintarResultadoBase();
   kpisPlan();
+  pintarModeloVan();
 }
 function pintarResultadoBase() {
   const cont = $("res-tabla-container");
@@ -4471,6 +5372,7 @@ IDB.get("focal", "prefs").then((f) => { if (f) APP.focal = new Set(f); });
 if ($("btn-analizar")) $("btn-analizar").onclick = analizar;
 if ($("btn-saltar")) $("btn-saltar").onclick = () => { APP.saltarMapa = true; $("btn-saltar").classList.add("hidden"); };
 if ($("btn-guardar")) $("btn-guardar").onclick = guardarEstado;
+if ($("btn-excel")) $("btn-excel").onclick = descargarExcelPlan;
 if ($("btn-presentar")) $("btn-presentar").onclick = () => presentar(!document.body.classList.contains("presentacion"));
 if ($("sel-estado")) $("sel-estado").onchange = (e) => abrirEstado(APP.estados[+e.target.value], false);
 if ($("buscar")) $("buscar").oninput = pintarSedes;
@@ -4488,7 +5390,7 @@ document.addEventListener("keydown", (e) => {
     const i = APP.estados.indexOf(APP.est), j = (i + (e.key === "ArrowRight" ? 1 : -1) + APP.estados.length) % APP.estados.length;
     abrirEstado(APP.estados[j], false);
   }
-  if (/^[1-9]$/.test(e.key) && TABS[+e.key - 1]) irA(TABS[+e.key - 1]);
+  if (/^[1-6]$/.test(e.key)) irA(PRES_TABS[+e.key - 1]);
 });
 refrescarRecientes();
 if (!APP.est) {
@@ -5346,7 +6248,7 @@ function simSamplePert(prng, norm, a, m, b) {
 // Motor de la pestana: el VAN de cerrar cada sede en su fecha del plan, con el mismo modelo y los mismos sorteos que usa el
 // calendario (sorteosMC). Decididos: en su fecha. Propuestos: en la fecha elegida. Red minima: en su mejor fecha.
 // Los vectores van en pesos (los graficos dividen por 1e6).
-const ETIQUETA_SIM = { DECIDIDO: "Cierre decidido", PROPUESTO: "Cierre firme", CONDICIONADO: "Cierre condicionado", "RED MÍNIMA": "Red mínima" };
+const ETIQUETA_SIM = { DECIDIDO: "Cierre decidido", PROPUESTO: "Cierre del plan", SEGUIMIENTO: "En seguimiento", "RED MÍNIMA": "Red mínima" };
 function simCorrerMotor() {
   if (!APP.est || !DASHBOARD_DATA) return;
   if (!APP._porId || !APP._alt) prepararCategorias();
@@ -5359,7 +6261,7 @@ function simCorrerMotor() {
     // Retencion de equilibrio: el VAN es lineal en la retencion total; la que deja el VAN del caso base en cero
     const v0 = vanDesdeBase(B, [mes], { ...pBase(B), R: 0 }).opciones[0].van, v1 = vanDesdeBase(B, [mes], { ...pBase(B), R: 1 }).opciones[0].van;
     const ret_be = v0 >= 0 ? 0 : v1 <= 0 ? 1 : -v0 / (v1 - v0);
-    const clase = k?.tipo === "decidido" ? "DECIDIDO" : k?.firme ? "PROPUESTO" : k || x?.seguimiento ? "CONDICIONADO" : "RED MÍNIMA";
+    const clase = k?.tipo === "decidido" ? "DECIDIDO" : k ? "PROPUESTO" : x?.seguimiento ? "SEGUIMIENTO" : "RED MÍNIMA";
     const fila = {
       sede_id: id, nombre: s.nombre || id, grupo: s.grupo || "", comuna: s.comuna || "", mes,
       venta_base_real: s.venta_12m_real || 0, costos_fijos_anual: (s.arriendo_mensual_clp || 0) * 12 + (s.otros_fijos_anual_clp || 0),
@@ -5380,7 +6282,7 @@ function simObtenerSedesEvaluadas() {
   const closedStores = state.closedStores || new Set();
   if (SIM.alcance === "CARTERA_ACTUAL") return SIM.resultadosMC.filter((s) => closedStores.has(s.sede_id));
   if (SIM.alcance === "FASE_1") return SIM.resultadosMC.filter((s) => s.clasificacion_sim === "PROPUESTO");
-  if (SIM.alcance === "FASE_1_2") return SIM.resultadosMC.filter((s) => s.clasificacion_sim === "DECIDIDO" || s.clasificacion_sim === "PROPUESTO" || (s.clasificacion_sim === "CONDICIONADO" && calendarioCierres()[s.sede_id]));
+  if (SIM.alcance === "FASE_1_2") return SIM.resultadosMC.filter((s) => s.clasificacion_sim === "DECIDIDO" || s.clasificacion_sim === "PROPUESTO");
   if (SIM.alcance === "SEDE_INDIVIDUAL") {
     const sel = SIM.sedeSel || SIM.resultadosMC[0]?.sede_id;
     return SIM.resultadosMC.filter((s) => s.sede_id === sel);
@@ -5497,7 +6399,7 @@ function simRenderizarGraficoDensidad(conjunto) {
             maxTicksLimit: 10,
             font: { size: 10 },
             maxRotation: 0,
-            callback: (v, idx) => mm(binEdges[idx] ?? 0)
+            callback: (v, idx) => `${(binEdges[idx] ?? 0) < 0 ? "−" : ""}$${fmt.num(Math.abs(binEdges[idx] ?? 0), 0)} M`
           }
         },
         y: {
@@ -5509,21 +6411,55 @@ function simRenderizarGraficoDensidad(conjunto) {
   });
 }
 
+const mmM = (v) => `${v < -0.5 ? "−" : v > 0.5 ? "+" : ""}$${fmt.num(Math.abs(v), 0)} M`;   // millones, con signo
 function simActualizarKPIs(conjunto) {
   const set = (id, txt, cls) => { const el = $(id); if (el) { el.textContent = txt; if (cls) el.className = cls; } };
-  const ids = ["simKpiDeltaVanP50", "simKpiBandaConfianza", "simKpiProbExito", "simKpiCvar5", "simKpiRetencion"];
+  const ids = ["simKpiDeltaVanP50", "simKpiBandaConfianza", "simKpiProbExito", "simKpiCvar5"];
   ids.forEach((id) => set(id + "Sub", ""));
   if (!conjunto || !conjunto.n_sedes) { ids.forEach((id) => set(id, "-")); return; }
-  const v = (x) => mm(x / 1e6, true), color = (x) => `text-xl font-extrabold ${x >= 0 ? "text-emerald-700" : "text-rose-700"}`;
+  const v = (x) => mmM(x / 1e6), color = (x) => `text-xl font-extrabold ${x >= 0 ? "text-emerald-700" : "text-rose-700"}`;
   set("simKpiDeltaVanP50", v(conjunto.y_conj_p50), color(conjunto.y_conj_p50));
-  set("simKpiDeltaVanP50Sub", `VAN del plan, caso base: ${v(conjunto.van_base)}`);
-  set("simKpiBandaConfianza", `${v(conjunto.y_conj_p10)} a ${v(conjunto.y_conj_p90)}`, "text-base font-extrabold text-slate-900");
-  set("simKpiProbExito", `${fmt.num(conjunto.probExito * 100, 0)}%`,
-    `text-xl font-extrabold ${conjunto.probExito >= probMin() ? "text-emerald-700" : conjunto.probExito >= 0.5 ? "text-amber-600" : "text-rose-700"}`);
-  set("simKpiProbExitoSub", `Mínimo para proponer un cierre: ${fmt.num(probMin() * 100, 0)}%`);
+  set("simKpiDeltaVanP50Sub", `Caso base ${v(conjunto.van_base)}`);
+  const el = $("simKpiDeltaVanP50Sub"); if (el) el.title = "La mediana queda bajo el caso base porque en los escenarios la tendencia solo puede amortiguarse más y los gastos suben más de lo que bajan";
+  set("simKpiBandaConfianza", `${v(conjunto.y_conj_p10)} a ${v(conjunto.y_conj_p90)}`, "text-xl font-extrabold text-slate-900");
+  const pe = conjunto.probExito;
+  set("simKpiProbExito", pe > 0.995 && pe < 1 ? `${fmt.num(pe * 100, 1)}%` : `${fmt.num(pe * 100, 0)}%`,
+    `text-xl font-extrabold ${pe >= probMin() ? "text-emerald-700" : pe >= 0.5 ? "text-amber-600" : "text-rose-700"}`);
+  set("simKpiProbExitoSub", `Mínimo ${fmt.num(probMin() * 100, 0)}%`);
   set("simKpiCvar5", v(conjunto.cvar5), color(conjunto.cvar5));
-  set("simKpiRetencion", `${fmt.num(conjunto.ret_esp_media * 100, 1)}% y ${fmt.num(conjunto.ret_be_media * 100, 1)}%`, "text-xl font-extrabold text-slate-900");
-  set("simKpiRetencionSub", "Promedio de las sedes evaluadas");
+}
+// Una sede elegida: barra con su situacion y que supuestos mueven su VAN. Para cada supuesto sorteado se ordenan los
+// escenarios y se compara el VAN promedio del 20% con el valor mas bajo frente al 20% con el mas alto
+const MOTORES_SIM = [["mf", "Clientes que van a otra sede"], ["md", "Clientes que pasan al canal digital"], ["dg", "Cambio en la tendencia de la sede"],
+  ["eps", "Variación anual de la venta"], ["phi", "Persistencia de la tendencia"], ["rA", "Tasa de descuento"], ["dc", "Alza de gastos"],
+  ["fo", "Costo del canal online"], ["uSal", "Meses de arriendo para salir"]];
+function simPintarSede() {
+  const barra = $("simSedeBarra"), card = $("simMotoresCard");
+  const r = SIM.alcance === "SEDE_INDIVIDUAL" ? SIM.sedeSimMap?.get(SIM.sedeSel) : null;
+  if (!barra || !card) return;
+  if (!r) { barra.className = "hidden"; card.classList.add("hidden"); return; }
+  const k = calendarioCierres()[r.sede_id], estado = r.clasificacion_sim === "DECIDIDO" ? "Cierra por decisión de la gerencia" : r.clasificacion_sim === "PROPUESTO" ? "Cierra por el plan" : r.clasificacion_sim === "SEGUIMIENTO" ? "No cierra, en seguimiento" : "No cierra, red mínima";
+  barra.className = "card !py-3 flex flex-wrap items-center justify-between gap-3";
+  barra.innerHTML = `<div class="flex flex-wrap items-baseline gap-x-3"><span class="text-base font-extrabold text-slate-900">${esc(nombreLindo(r.nombre))}</span>
+      <span class="text-xs font-semibold text-slate-600">${estado}, ${k ? "" : "mejor fecha "}${nombreMes(r.mes)}</span></div>
+    <button type="button" class="btn-s" onclick="window.simCambiarAlcance('FASE_1')">Volver al plan</button>`;
+  const B = r._B, P = sorteosSede(B), vec = r.vectorDeltaVan.map((x) => x / 1e6), N = vec.length, q = Math.max(1, Math.floor(N * 0.2));
+  const filas = MOTORES_SIM.map(([key, nom]) => {
+    const x = P.map((p) => (key === "eps" ? p.eps.reduce((a, b) => a + b, 0) / p.eps.length : p[key]));
+    const idx = x.map((_, i) => i).sort((a, b) => x[a] - x[b]);
+    const prom = (l) => l.reduce((a, i) => a + vec[i], 0) / l.length;
+    return { nom, bajo: prom(idx.slice(0, q)), alto: prom(idx.slice(N - q)) };
+  }).sort((a, b) => Math.abs(b.alto - b.bajo) - Math.abs(a.alto - a.bajo));
+  const lim = Math.max(1, ...filas.flatMap((f) => [Math.abs(f.bajo), Math.abs(f.alto)])), pos = (v) => 50 + (v / lim) * 50;
+  $("simMotoresTitulo").textContent = `Qué mueve el VAN de ${nombreLindo(r.nombre)}`;
+  $("simMotores").innerHTML = `<div class="grid grid-cols-[220px_1fr_150px] gap-x-3 gap-y-1.5 text-xs items-center">
+    <span></span><span class="text-[11px] text-slate-500 text-center">VAN promedio, millones</span><span class="text-[11px] text-slate-500 text-right">valor bajo y alto</span>
+    ${filas.map((f) => { const a = Math.min(pos(f.bajo), pos(f.alto)), b = Math.max(pos(f.bajo), pos(f.alto));
+      return `<span class="text-slate-700">${f.nom}</span>
+      <div class="relative h-4"><div class="absolute inset-y-0 left-1/2 w-px bg-slate-300"></div>
+        <div class="absolute inset-y-0.5 rounded-sm bg-[#003058]/80" style="left:${a}%;width:${Math.max(0.5, b - a)}%"></div></div>
+      <span class="text-right tabular-nums ${f.bajo < 0 || f.alto < 0 ? "text-rose-700" : "text-slate-800"}">${mmM(f.bajo)} y ${mmM(f.alto)}</span>`; }).join("")}</div>`;
+  card.classList.remove("hidden");
 }
 
 function simRenderizarTablaRanking() {
@@ -5536,19 +6472,19 @@ function simRenderizarTablaRanking() {
   if (txt) filas = filas.filter((f) => [f.sede_id, f.nombre, f.comuna, f.grupo].some((x) => (x || "").toLowerCase().includes(txt)));
   if ($("simConteoFilas")) $("simConteoFilas").textContent = `${filas.length} sedes`;
   if (!filas.length) { container.innerHTML = `<div class="p-8 text-center text-xs text-slate-400">No hay sedes con ese filtro.</div>`; return; }
-  const orden = { DECIDIDO: 0, PROPUESTO: 1, CONDICIONADO: 2, "RED MÍNIMA": 3 };
+  const orden = { DECIDIDO: 0, PROPUESTO: 1, SEGUIMIENTO: 2, "RED MÍNIMA": 3 };
   filas = [...filas].sort((a, b) => orden[a.clasificacion_sim] - orden[b.clasificacion_sim] || (a.clasificacion_sim === "RED MÍNIMA" ? b.prob_exito_cierre - a.prob_exito_cierre : a.mes < b.mes ? -1 : 1));
-  const m = (x) => mm(x / 1e6, true), pc = (x) => `${fmt.num(x * 100, 1)}%`;
+  const m = (x) => mmM(x / 1e6), pc = (x) => `${fmt.num(x * 100, 1)}%`;
   const th = (t, cls = "text-right") => `<th class="py-2 px-3 ${cls} font-semibold whitespace-nowrap">${t}</th>`;
   const td = (t, cls = "text-right") => `<td class="py-1.5 px-3 ${cls} tabular-nums whitespace-nowrap">${t}</td>`;
   container.innerHTML = `<table class="w-full text-xs border-collapse" id="simTablaRanking"><thead><tr class="text-slate-500 border-b border-slate-200 sticky top-0 bg-white z-10">
-    ${th("Cerrar", "text-center")}${th("Sede", "text-left")}${th("En el plan", "text-left")}${th("Fecha", "text-left")}${th("Retención física")}${th("Retención digital")}
-    ${th("Retención de equilibrio")}${th("VAN caso base")}${th("P10")}${th("P50")}${th("P90")}${th("Probabilidad VAN positivo")}${th("Peor 5%")}</tr></thead>
+    ${th("Sede", "text-left")}${th("En el plan", "text-left")}${th("Fecha", "text-left")}${th("Retención física")}${th("Retención digital")}
+    ${th("Clientes a retener para no perder valor")}${th("VAN caso base")}${th("P10")}${th("P50")}${th("P90")}${th("Probabilidad VAN positivo")}${th("Peor 5%")}</tr></thead>
     <tbody class="divide-y divide-slate-100">${filas.map((r) => {
       const plan = r.clasificacion_sim !== "RED MÍNIMA";
-      return `<tr class="${plan ? "font-medium" : "text-slate-600"} hover:bg-slate-50">
-        <td class="py-1.5 px-3 text-center"><input type="checkbox" ${closedStores.has(r.sede_id) ? "checked" : ""} onchange="window.simToggleCierreSede('${r.sede_id}', this.checked)" class="rounded text-[#003058] focus:ring-0 cursor-pointer"></td>
-        <td class="py-1.5 px-3 text-slate-900 cursor-pointer hover:text-[#003058] whitespace-nowrap" onclick="window.simSeleccionarSede('${r.sede_id}')">${esc(nombreLindo(r.nombre))}</td>
+      const sel = SIM.alcance === "SEDE_INDIVIDUAL" && SIM.sedeSel === r.sede_id;
+      return `<tr class="${plan ? "font-medium" : "text-slate-600"} ${sel ? "bg-[#E8EEF5]" : "hover:bg-slate-50"} cursor-pointer" onclick="window.simSeleccionarSede('${r.sede_id}'); document.getElementById('tab-simulacion').scrollIntoView({ behavior: 'smooth' })">
+        <td class="py-1.5 px-3 text-slate-900 whitespace-nowrap ${sel ? "font-extrabold" : ""}">${esc(nombreLindo(r.nombre))}</td>
         ${td(ETIQUETA_SIM[r.clasificacion_sim], "text-left")}${td(nombreMes(r.mes), "text-left")}
         ${td(pc(r.mf_top3))}${td(pc(r.md_moda))}${td(pc(r.retencion_breakeven))}
         ${td(m(r.van_base), "text-right font-semibold")}${td(m(r.delta_van_p10))}${td(m(r.delta_van_p50))}${td(m(r.delta_van_p90))}
@@ -5568,20 +6504,24 @@ function simPoblarSelectSedes() {
 // Controles de Riesgo: numero de escenarios y que cierres se evaluan (los supuestos se mueven en Sensibilidad)
 function simSincronizarControles() {
   if ($("simIteraciones")) $("simIteraciones").value = SIM.iteraciones;
+  if (SIM.alcance === "CARTERA_ACTUAL") SIM.alcance = "FASE_1";   // opcion retirada: los cierres a mano se ven en Demanda y VAN
   const r = document.querySelector(`input[name="simAlcance"][value="${SIM.alcance}"]`); if (r) r.checked = true;
+  if ($("simSelSede")) $("simSelSede").hidden = SIM.alcance !== "SEDE_INDIVIDUAL";
 }
 
 function pintarSimulacion() {
   if (!APP.est || !DASHBOARD_DATA) return;
   simSincronizarControles();
   simCorrerMotor();
+  if (document.body.classList.contains("presentacion")) { pintarSimPres(); return; }
   simPoblarSelectSedes();
   const evaluadas = simObtenerSedesEvaluadas(), conjunto = simCalcularCarteraConjunta(evaluadas);
   const R = SIM.resultadosMC, n = (c) => R.filter((r) => r.clasificacion_sim === c).length;
-  if ($("simResumen")) $("simResumen").textContent = `${SIM.iteraciones} escenarios. ${n("DECIDIDO")} cierres decididos, ${n("PROPUESTO")} firmes (VAN positivo en al menos el ${fmt.num(probMin() * 100, 0)}% de los escenarios), ${n("CONDICIONADO")} condicionados y ${n("RED MÍNIMA")} sedes en la red mínima.`;
+  if ($("simResumen")) $("simResumen").textContent = `${fmt.num(SIM.iteraciones, 0)} escenarios`;
   simActualizarKPIs(conjunto);
   simRenderizarGraficoDensidad(conjunto);
-  const sub = $("simDensidadSub"); if (sub && conjunto.n_sedes) sub.textContent = `${conjunto.n_sedes} ${conjunto.n_sedes === 1 ? "sede" : "sedes"}: P10 ${mm(conjunto.y_conj_p10 / 1e6, true)}, P50 ${mm(conjunto.y_conj_p50 / 1e6, true)}, P90 ${mm(conjunto.y_conj_p90 / 1e6, true)}`;
+  const sub = $("simDensidadSub"); if (sub) sub.textContent = conjunto.n_sedes ? `${conjunto.n_sedes} ${conjunto.n_sedes === 1 ? "sede" : "sedes"}` : "";
+  simPintarSede();
   // Los cierres marcados a mano pueden no ser los del plan: se dice cuales difieren
   if (SIM.alcance === "CARTERA_ACTUAL" && $("simResumen")) {
     const enPlan = new Set(Object.keys(calendarioCierres())), marc = state.closedStores || new Set();
@@ -5600,6 +6540,7 @@ window.simRecalcular = function() {
 
 window.simCambiarAlcance = function(nuevoAlcance) {
   SIM.alcance = nuevoAlcance;
+  if ($("simSelSede")) $("simSelSede").hidden = nuevoAlcance !== "SEDE_INDIVIDUAL";
   pintarSimulacion();
 };
 
@@ -5654,124 +6595,19 @@ window.simExportarCSV = function() {
   a.click();
 };
 // Que cierres se evaluan: un solo estado (SIM.alcance) para Riesgo y Sensibilidad. Sensibilidad no evalua los decididos
-// (ya estan resueltos), asi que "Cierres firmes" = FASE_1 y cualquier otro alcance = firmes y condicionados.
-const soloFirmes = () => SIM.alcance === "FASE_1";
+// (ya estan resueltos), asi que siempre evalua los cierres del plan.
 // =====================================================================
 // Sensibilidad y flexibilidad del plan
-// Sensibilidad: el plan completo (cuantos cierres y su VAN) con cada supuesto en un valor bajo y uno alto.
+// Sensibilidad: el VAN de los cierres con los supuestos movidos a mano, con y sin incertidumbre (el plan no cambia).
 // Flexibilidad: que pasa si los cierres se postergan 1 a 3 anos (a la primera ventana de contrato despues del atraso), y el
 // valor de esperar un ano para decidir con la venta observada (opcion real: en cada escenario se cierra solo si conviene).
 // =====================================================================
-function resumenPlanActual() {
-  const G = gruposPlan();
-  const ids = (g) => g.map(([id]) => id);
-  return { f: G.firmes.length, c: G.condicionados.length, s: G.seguimiento.length, van: [...G.firmes, ...G.condicionados].reduce((a, [, k]) => a + (k.van || 0), 0),
-    ids: { f: ids(G.firmes), c: ids(G.condicionados), s: ids(G.seguimiento) } };
-}
-function casosSensibilidad() {
-  const f0 = { ...finz() }, t0 = APP.tasaDescuento, mig0 = APP.migracion || "modelo", u00 = state.u0, rd0 = APP.retencionDigital;
-  const fin = (o) => () => { APP.finanzas = { ...f0, ...o }; };
-  const pc = (x) => `${fmt.num(x * 100, 1)}%`;
-  return {
-    restaurar: () => { APP.finanzas = f0; APP.tasaDescuento = t0; APP.migracion = mig0; state.u0 = u00; APP.retencionDigital = rd0; },
-    casos: [
-      ["Tasa de descuento (WACC nominal)", pc(t0 - 0.015), pc(t0 + 0.015), () => { APP.tasaDescuento = t0 - 0.015; }, () => { APP.tasaDescuento = t0 + 0.015; }],
-      ["Alza real de los gastos", "-1 punto", "+1 punto", fin({ crecArriendo: f0.crecArriendo - 0.01, crecOtros: f0.crecOtros - 0.01 }), fin({ crecArriendo: f0.crecArriendo + 0.01, crecOtros: f0.crecOtros + 0.01 })],
-      ["Persistencia de la tendencia", `${Math.round(((f0.amortiguacion ?? 1) - 0.15) * 100)}%`, `${Math.round((f0.amortiguacion ?? 1) * 100)}%`, fin({ amortiguacion: (f0.amortiguacion ?? 1) - 0.15 }), fin({})],
-      ["Probabilidad mínima de VAN positivo", `${Math.round(((f0.probMin ?? 0.8) - 0.1) * 100)}%`, `${Math.round(((f0.probMin ?? 0.8) + 0.1) * 100)}%`, fin({ probMin: (f0.probMin ?? 0.8) - 0.1 }), fin({ probMin: Math.min(0.99, (f0.probMin ?? 0.8) + 0.1) })],
-      ["Migración de clientes", "Modelo Huff", "Supuesto HCH (30%)", () => aplicarMigracion("modelo", false), () => aplicarMigracion("conservadora", false)],
-      ["Programa digital en sedes sin alternativa", "Sin programa", "Meta 40%, $20.000.000 por sede", fin({ metaDigital: 0 }), fin({ metaDigital: 0.4, costoPrograma: 20 })],
-    ],
-  };
-}
-// Se calcula de a un caso por vez para no congelar la pagina; se recuerda mientras no cambien los supuestos
-function calcularSensibilidad(alAvanzar) {
-  calendarioCierres();
-  const clave = APP._calMemo.clave;
-  if (APP._sens?.clave === clave && APP._sens.listo) return alAvanzar(APP._sens);
-  if (APP._sens?.clave === clave) return;   // ya en curso
-  const S = (APP._sens = { clave, base: resumenPlanActual(), filas: [], listo: false });
-  const { casos, restaurar } = casosSensibilidad();
-  let i = 0;
-  const paso = () => {
-    if (APP._sens !== S) return;
-    const [n, lb, lh, bajo, alto] = casos[i];
-    bajo(); APP._calMemo = null; APP._sorteos = null; const L = resumenPlanActual();
-    alto(); APP._calMemo = null; APP._sorteos = null; const H = resumenPlanActual();
-    restaurar(); APP._calMemo = null; APP._sorteos = null; calendarioCierres();
-    S.filas.push({ n, lb, lh, L, H }); i++;
-    if (i >= casos.length) S.listo = true;
-    alAvanzar(S);
-    if (!S.listo) setTimeout(paso, 30);
-  };
-  alAvanzar(S);
-  setTimeout(paso, 30);
-}
-function pintarSensibilidad(S) {
-  if (APP.tab !== "sensibilidad" || !$("sens-tabla")) return;
-  // La tabla se muestra entera cuando terminan todos los casos; mientras, solo el avance
-  if (!S.listo) {
-    const n = casosSensibilidad().casos.length, k = S.filas.length;
-    $("sens-estado").textContent = `(calculando ${k} de ${n})`;
-    $("sens-tabla").innerHTML = `<div class="py-3"><div class="h-1.5 w-full max-w-md bg-slate-200 rounded-full overflow-hidden"><div class="h-full bg-[#003058] transition-all" style="width:${Math.round((k / n) * 100)}%"></div></div></div>`;
-    return;
-  }
-  $("sens-estado").textContent = "";
-  // Cada escenario en una fila: composicion del plan (barra apilada), cambio en cada grupo y VAN frente al caso base (barra
-  // divergente). Al hacer clic se listan las sedes que cambian de grupo.
-  const GR = [["f", "Firmes", "#003058", "#fff"], ["c", "Condicionados", "#5b8fd4", "#fff"], ["s", "En seguimiento", "#c3d5ee", "#1f2937"]];
-  const casos = [{ k: "base", n: "Caso base", v: "", x: S.base }, ...S.filas.flatMap((r, i) => [{ k: `${i}L`, n: r.n, v: r.lb, x: r.L, i }, { k: `${i}H`, n: r.n, v: r.lh, x: r.H, i }])];
-  const maxTot = Math.max(1, ...casos.map(({ x }) => x.f + x.c + x.s)), maxDif = Math.max(1, ...casos.map(({ x }) => Math.abs(x.van - S.base.van)));
-  if (!casos.some((c) => c.k === APP._sensSel)) APP._sensSel = casos.find((c) => c.k !== "base" && Math.abs(c.x.van - S.base.van) >= 0.5)?.k || "base";
-  const barra = (x) => `<div class="flex h-5 rounded overflow-hidden bg-slate-100" style="width:${((x.f + x.c + x.s) / maxTot) * 100}%">${GR.map(([g, t, bg, fg]) => x[g]
-    ? `<div class="flex items-center justify-center text-[10px] font-semibold border-r-2 border-white last:border-r-0" style="width:${(x[g] / (x.f + x.c + x.s)) * 100}%;background:${bg};color:${fg}" title="${t}: ${x[g]}">${x[g]}</div>` : "").join("")}</div>`;
-  const cambios = (x) => GR.map(([g, t]) => { const d = x[g] - S.base[g]; return d ? `<span class="${d > 0 ? "text-[#2a78d6]" : "text-[#c03a39]"}">${d > 0 ? "+" : "−"}${Math.abs(d)} ${t.toLowerCase()}</span>` : ""; }).filter(Boolean).join(" · ") || `<span class="text-slate-400">sin cambios</span>`;
-  const difVan = (x) => { const d = x.van - S.base.van, w = (Math.abs(d) / maxDif) * 50;
-    return `<div class="relative h-3 w-full"><div class="absolute inset-y-0 left-1/2 w-px bg-slate-300"></div>${Math.abs(d) >= 0.5 ? `<div class="absolute inset-y-0 rounded-sm" style="${d > 0 ? "left:50%" : `left:${50 - w}%`};width:${w}%;background:${d > 0 ? "#2a78d6" : "#e34948"}"></div>` : ""}</div>
-      <div class="text-[11px] text-right ${d > 0.5 ? "text-[#1f5fae]" : d < -0.5 ? "text-[#c03a39]" : "text-slate-400"}">${Math.abs(d) < 0.5 ? "igual" : mm(d, true)}</div>`; };
-  const fila = (c) => `<button type="button" data-k="${c.k}" class="w-full grid grid-cols-12 gap-3 items-center text-left px-2 py-1.5 rounded-lg border ${c.k === APP._sensSel ? "border-[#003058] bg-slate-50" : "border-transparent hover:bg-slate-50"}">
-      <span class="col-span-12 md:col-span-2 text-slate-700 font-medium">${c.k === "base" ? "Caso base" : esc(c.v)}</span>
-      <span class="col-span-12 md:col-span-4">${barra(c.x)}</span>
-      <span class="col-span-12 md:col-span-3 text-[11px]">${c.k === "base" ? `<span class="text-slate-500">${S.base.f + S.base.c} cierres en el plan</span>` : cambios(c.x)}</span>
-      <span class="col-span-12 md:col-span-3"><div class="text-right font-semibold text-slate-900">${mm(c.x.van, true)}</div>${c.k === "base" ? "" : difVan(c.x)}</span></button>`;
-  const leyenda = GR.map(([, t, bg]) => `<span class="inline-flex items-center gap-1"><span class="w-3 h-3 rounded-sm inline-block" style="background:${bg}"></span>${t}</span>`).join("");
-  const sel = casos.find((c) => c.k === APP._sensSel);
-  $("sens-tabla").innerHTML = `<div class="grid grid-cols-1 xl:grid-cols-3 gap-5">
-    <div class="xl:col-span-2 space-y-1">
-      <div class="hidden md:grid grid-cols-12 gap-3 px-2 pb-1 text-[11px] font-semibold text-slate-500 border-b border-slate-200">
-        <span class="col-span-2">Escenario</span><span class="col-span-4 flex flex-wrap gap-3 font-normal">${leyenda}</span><span class="col-span-3">Cambio en el plan</span><span class="col-span-3 text-right">VAN del plan y diferencia</span></div>
-      ${fila(casos[0])}
-      ${S.filas.map((r, i) => `<div class="pt-2"><div class="px-2 text-[11px] font-bold uppercase tracking-wide text-slate-500">${esc(r.n)}</div>${fila(casos[1 + 2 * i])}${fila(casos[2 + 2 * i])}</div>`).join("")}
-    </div>
-    <div class="xl:sticky xl:top-4 self-start rounded-lg border border-slate-200 p-3 space-y-3" id="sens-detalle">${detalleCasoPlan(S.base, sel)}</div></div>`;
-  $("sens-tabla").querySelectorAll("button[data-k]").forEach((b) => (b.onclick = () => { APP._sensSel = b.dataset.k; pintarSensibilidad(S); }));
-}
-// Sedes que cambian de grupo entre el caso base y un escenario rehecho
-function detalleCasoPlan(base, c) {
-  if (!c || c.k === "base") return `<p class="text-xs text-slate-500">Elige un escenario a la izquierda para ver qué sedes entran, salen o cambian de grupo.</p>`;
-  const nom = (id) => esc(nombreLindo(APP._porId?.[id]?.nombre ?? id)), b = base.ids, x = c.x.ids;
-  const enPlan = (g) => new Set([...g.f, ...g.c]), bp = enPlan(b), xp = enPlan(x), bf = new Set(b.f), xf = new Set(x.f), bs = new Set(b.s), xs = new Set(x.s);
-  const grupos = [
-    ["Se agregan al plan de cierres", [...xp].filter((id) => !bp.has(id)), "#2a78d6"],
-    ["Salen del plan de cierres", [...bp].filter((id) => !xp.has(id)), "#e34948"],
-    ["Pasan a firme", [...xf].filter((id) => bp.has(id) && !bf.has(id)), "#003058"],
-    ["Pasan a condicionado", [...bf].filter((id) => xp.has(id) && !xf.has(id)), "#5b8fd4"],
-    ["Entran a seguimiento", [...xs].filter((id) => !bs.has(id)), "#8a94a3"],
-    ["Salen de seguimiento", [...bs].filter((id) => !xs.has(id)), "#8a94a3"],
-  ].filter(([, l]) => l.length);
-  const d = c.x.van - base.van;
-  return `<div><div class="text-[11px] font-bold uppercase tracking-wide text-slate-500">${esc(c.n)}</div><div class="text-sm font-extrabold text-slate-900">${esc(c.v)}</div>
-    <div class="text-xs text-slate-600 mt-1">VAN del plan ${mm(c.x.van, true)} (${Math.abs(d) < 0.5 ? "igual al caso base" : `${mm(d, true)} frente al caso base`})</div></div>
-    ${grupos.length ? grupos.map(([t, l, col]) => `<div><div class="flex items-center gap-1.5 text-xs font-semibold text-slate-700"><span class="w-2.5 h-2.5 rounded-full inline-block" style="background:${col}"></span>${t} (${l.length})</div>
-      <div class="flex flex-wrap gap-1 mt-1">${l.map((id) => `<span class="px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 text-[11px]">${nom(id)}</span>`).join("")}</div></div>`).join("")
-      : `<p class="text-xs text-slate-500">Las mismas sedes en los mismos grupos; solo cambia el VAN de cada cierre.</p>`}`;
-}
 function datosFlexibilidad() {
   calendarioCierres();
   if (APP._flex?.clave === APP._calMemo.clave) return APP._flex;
   const cal = calendarioCierres(), G = gruposPlan(), inicio = sumarMeses(historia().corte, 1), fin = finPlan();
   const filas = [], grupo = (g, tipo) => g.filter(([, k]) => k.mes).map(([id, k]) => [id, k, tipo]);
-  for (const [id, k, tipo] of [...grupo(G.decididos, "decidido"), ...grupo(G.firmes, "firme"), ...grupo(G.condicionados, "condicionado"),
+  for (const [id, k, tipo] of [...grupo(G.decididos, "decidido"), ...grupo(G.plan, "plan"),
     ...grupo(G.seguimiento, "seguimiento"), ...grupo(G.red, "red")]) {
     const s = APP._porId[id];
     if (!s || !DASHBOARD_DATA.locales[id] || sinGastos(s)) continue;
@@ -5781,17 +6617,8 @@ function datosFlexibilidad() {
     // Fecha de mayor VAN entre las ventanas del calendario (el plan toma la primera a menos de "tolerancia" del maximo)
     const vc = ventanasCierre(s, sumarMeses(inicio, sinAlternativa(s) ? mesesPlanDigital(s) : 0), fin).meses;
     const mejor = vc.length ? vanDesdeBase(B, vc).opciones.reduce((x, y) => (y.van > x.van ? y : x)) : null;
-    const fila = { id, n: nombreLindo(s.nombre), tipo, enPlan: tipo === "firme" || tipo === "condicionado", firme: tipo === "firme", mes: k.mes, atrasos, vanRef: k.van, probRef: k.mc?.prob, mejor: mejor && { m: mejor.mes, v: mejor.van, prob: mejor.mes !== k.mes ? mcCierre(B, [mejor.mes])[0].prob : null } };
-    const m1 = atrasos[1]?.m;
-    if (m1) {
-      // Esperar un ano y decidir = E[max(0, VAN un ano despues)]. Se separa en lo que gana solo cerrar mas tarde
-      // (E[VAN un ano despues] - E[VAN hoy]) y el valor de decidir con la venta observada (opcion real, siempre >= 0)
-      const [a, b] = mcCierre(B, [k.mes, m1]);
-      let opc = 0; for (const y of b.vector) opc += Math.max(0, y);
-      const esperar = opc / b.vector.length;
-      Object.assign(fila, { hoy: a.media, tarde: b.media, esperar, postergar: b.media - a.media, info: esperar - b.media });
-      fila.rec = esperar - a.media <= 0.5 ? "fecha" : fila.info > fila.postergar ? "esperar" : "tarde";
-    }
+    const fila = { id, n: nombreLindo(s.nombre), tipo, enPlan: tipo === "plan", mes: k.mes, atrasos, vanRef: k.van, probRef: k.mc?.prob, mejor: mejor && { m: mejor.mes, v: mejor.van, prob: mejor.mes !== k.mes ? mcCierre(B, [mejor.mes])[0].prob : null } };
+    fila.B = B; fila.m1 = atrasos[1]?.m || null;
     filas.push(fila);
   }
   // Sedes fisicas que no se pueden evaluar, con el motivo (para que la lista cubra toda la red)
@@ -5800,77 +6627,111 @@ function datosFlexibilidad() {
     motivo: sinGastos(s) ? "sin datos de gastos" : !DASHBOARD_DATA.locales[s.sede_id] ? "sin proyección de demanda" : M[s.sede_id]?.motivo || "sin fecha de cierre posible en el horizonte" }));
   return (APP._flex = { clave: APP._calMemo.clave, filas, excluidas });
 }
+// Esperar un ano y decidir = E[max(0, VAN un ano despues)]. Se separa en lo que gana solo cerrar mas tarde
+// (E[VAN un ano despues] - E[VAN hoy]) y el valor de decidir con la venta observada (opcion real, siempre >= 0).
+// Con los sorteos de Sensibilidad (N propio, no cambia el plan); se recuerda por sede y N.
+function opcionFlex(f, N) {
+  const clave = `${APP._calMemo.clave}|${N}|${f.id}`;
+  APP._flexOpc = APP._flexOpc || new Map();
+  if (APP._flexOpc.has(clave)) return APP._flexOpc.get(clave);
+  if (!f.m1) { APP._flexOpc.set(clave, null); return null; }
+  const P = sorteosSens(f.B, N); let a = 0, b = 0, opc = 0;
+  for (const p of P) { const o = vanDesdeBase(f.B, [f.mes, f.m1], p).opciones; a += o[0].van; b += o[1].van; opc += Math.max(0, o[1].van); }
+  a /= N; b /= N; opc /= N;
+  const r = { hoy: a, tarde: b, esperar: opc, postergar: b - a, info: opc - b };
+  r.rec = opc - a <= 0.5 ? "fecha" : r.info > r.postergar ? "esperar" : "tarde";
+  APP._flexOpc.set(clave, r);
+  return r;
+}
+function filasFlexAlcance(F) {
+  const alc = APP._flexAlc || "plan";
+  if (alc === "sede") return F.filas.filter((f) => f.id === APP._flexSede);
+  return F.filas.filter((f) => f.tipo === "plan" || (alc === "todos" && f.tipo === "decidido"));
+}
 function pintarFlexibilidad() {
   if (!APP.est || !DASHBOARD_DATA || !$("flex-tabla")) return;
   if (!APP._porId || !APP._alt) prepararCategorias();
-  const F = datosFlexibilidad(), at = APP._atraso ?? 1, firmes = F.filas.filter((f) => f.firme);
-  const total = (d) => firmes.reduce((a, f) => a + (f.atrasos[d]?.v ?? 0), 0), totales = [0, 1, 2, 3].map(total);
+  const F = datosFlexibilidad(), at = APP._atraso ?? 1, alc = APP._flexAlc || "plan", N = APP._flexN || 5000;
+  // Controles: alcance, sede y escenarios
+  const selS = $("flex-sede");
+  document.querySelectorAll('input[name="flexAlc"]').forEach((r) => { r.checked = r.value === alc; r.onchange = () => { APP._flexAlc = r.value; if (r.value === "sede" && !APP._flexSede) APP._flexSede = selS.value; pintarFlexibilidad(); }; });
+  if (selS) {
+    const ops = [...F.filas].sort((a, b) => a.n.localeCompare(b.n));
+    if (!APP._flexSede) APP._flexSede = ops[0]?.id;
+    selS.innerHTML = ops.map((f) => `<option value="${esc(f.id)}">${esc(f.n)}</option>`).join(""); selS.value = APP._flexSede; selS.hidden = alc !== "sede";
+    selS.onchange = () => { APP._flexSede = selS.value; pintarFlexibilidad(); };
+  }
+  if ($("flex-n")) { $("flex-n").value = String(N); $("flex-n").onchange = () => { APP._flexN = +$("flex-n").value; pintarFlexibilidad(); }; }
+  const base = filasFlexAlcance(F);
+  // Valor de esperar: lo que falte se calcula por tandas (una sede por vez) y se vuelve a pintar
+  const faltan = base.filter((f) => !APP._flexOpc?.has(`${APP._calMemo.clave}|${N}|${f.id}`));
+  if (faltan.length) {
+    const tok = (APP._flexTok = (APP._flexTok || 0) + 1);
+    $("flex-mc-estado").textContent = `calculando ${base.length - faltan.length} de ${base.length}`;
+    setTimeout(() => { if (tok !== APP._flexTok) return; opcionFlex(faltan[0], N); if (APP.tab === "flexibilidad") pintarFlexibilidad(); }, 0);
+  } else $("flex-mc-estado").textContent = "";
+  const filasA = base.map((f) => ({ ...f, ...(APP._flexOpc?.get(`${APP._calMemo.clave}|${N}|${f.id}`) || {}) }));
+  const total = (d) => filasA.reduce((a, f) => a + (f.atrasos[d]?.v ?? 0), 0), totales = [0, 1, 2, 3].map(total);
   $("flex-atraso").innerHTML = [0, 1, 2, 3].map((a) => `<button type="button" data-a="${a}" aria-pressed="${a === at}">${a === 0 ? "A tiempo" : `${a} año${a === 1 ? "" : "s"}`}</button>`).join("");
   $("flex-atraso").querySelectorAll("button").forEach((b) => (b.onclick = () => { APP._atraso = +b.dataset.a; pintarFlexibilidad(); }));
   const color = (v) => (v > 0.5 ? "text-emerald-800" : v < -0.5 ? "text-rose-800" : "");
   const dato = (k, v, cls = "", sub = "") => `<div><dt class="text-xs text-slate-500">${k}</dt><dd class="font-semibold text-lg tabular-nums mt-0.5 ${cls}">${v}</dd>${sub ? `<dd class="text-[11px] text-slate-500">${sub}</dd>` : ""}</div>`;
-  const dif = totales[at] - totales[0], conOpc = F.filas.filter((f) => f.enPlan && f.hoy != null), esperan = conOpc.filter((f) => f.rec === "esperar");
+  const dif = totales[at] - totales[0], conOpc = filasA.filter((f) => f.hoy != null), esperan = conOpc.filter((f) => f.rec === "esperar");
   const valorFlex = esperan.reduce((a, f) => a + f.info, 0);
-  $("flex-kpis").innerHTML = dato("VAN del plan a tiempo", mm(totales[0], true), "", `${firmes.length} cierre${firmes.length === 1 ? "" : "s"} firme${firmes.length === 1 ? "" : "s"}`)
-    + dato(`VAN del plan con ${at ? `${at} año${at === 1 ? "" : "s"} de atraso` : "el calendario a tiempo"}`, mm(totales[at], true))
-    + dato("Diferencia por postergar", at ? mm(dif, true) : "-", color(dif), at && Math.abs(totales[0]) > 0.5 ? signo((dif / Math.abs(totales[0])) * 100, 0, "%") : "")
-    + dato("Conviene esperar y decidir", `${esperan.length} de ${conOpc.length} cierres`, "", esperan.length ? `valor de decidir con la venta observada ${mm(valorFlex, true)} · firmes y condicionados` : "firmes y condicionados: decidir con la venta observada no agrega valor");
-  // Una fila por cierre: linea de tiempo (fecha del plan -> fecha con atraso), costo de postergar y valor de esperar
-  const fin = finPlan(), t0 = F.filas.reduce((a, f) => (f.atrasos[0].m < a ? f.atrasos[0].m : a), fin), span = Math.max(1, difMeses(t0, fin));
+  const quien = alc === "sede" ? filasA[0]?.n || "" : `${filasA.length} cierres`;
+  $("flex-kpis").innerHTML = dato("VAN a tiempo", mmM(totales[0]), "", quien)
+    + dato(at ? `Con ${at} año${at === 1 ? "" : "s"} de atraso` : "Con el calendario a tiempo", mmM(totales[at]))
+    + dato("Diferencia por postergar", at ? mmM(dif) : "-", color(dif), at && Math.abs(totales[0]) > 0.5 ? signo((dif / Math.abs(totales[0])) * 100, 0, "%") : "")
+    + dato("Conviene esperar y decidir", conOpc.length ? `${esperan.length} de ${conOpc.length}` : "-", "", esperan.length ? `valor ${mmM(valorFlex)}` : "");
+  // Una fila por sede: linea de tiempo (fecha -> fecha con atraso), costo de postergar y valor de esperar
+  const fin = finPlan(), t0 = filasA.reduce((a, f) => (f.atrasos[0].m < a ? f.atrasos[0].m : a), fin), span = Math.max(1, difMeses(t0, fin));
   const pos = (m) => Math.max(0, Math.min(100, (difMeses(t0, m) / span) * 100));
   const anos = []; for (let y = +t0.slice(0, 4) + 1; y <= +fin.slice(0, 4); y++) anos.push(y);
-  const difs = F.filas.map((f) => (f.atrasos[at] ? f.atrasos[at].v - f.atrasos[0].v : 0)), maxD = Math.max(1, ...difs.map(Math.abs));
+  const difs = filasA.map((f) => (f.atrasos[at] ? f.atrasos[at].v - f.atrasos[0].v : 0)), maxD = Math.max(1, ...difs.map(Math.abs));
   const maxO = Math.max(1, ...conOpc.map((f) => Math.abs(f.esperar - f.hoy)));
-  const barraDiv = (d, max) => { const w = (Math.abs(d) / max) * 50;
-    return `<div class="relative h-2.5 w-full"><div class="absolute inset-y-0 left-1/2 w-px bg-slate-300"></div>${Math.abs(d) >= 0.5 ? `<div class="absolute inset-y-0 rounded-sm" style="${d > 0 ? "left:50%" : `left:${50 - w}%`};width:${w}%;background:${d > 0 ? "#2a78d6" : "#e34948"}"></div>` : ""}</div>`; };
+  const barraDiv = (d, max) => { const w = Math.min(50, (Math.abs(d) / max) * 50);
+    return `<div class="relative h-2.5 w-full overflow-hidden"><div class="absolute inset-y-0 left-1/2 w-px bg-slate-300"></div>${Math.abs(d) >= 0.5 ? `<div class="absolute inset-y-0 rounded-sm" style="${d > 0 ? "left:50%" : `left:${50 - w}%`};width:${w}%;background:${d > 0 ? "#2a78d6" : "#e34948"}"></div>` : ""}</div>`; };
   const linea = (f) => { const a = f.atrasos[0], x = f.atrasos[at], p0 = pos(a.m), p1 = x ? pos(x.m) : 100;
     return `<div class="relative h-5">${anos.map((y) => `<div class="absolute inset-y-0 w-px bg-slate-100" style="left:${pos(`${y}-01`)}%"></div>`).join("")}
       <div class="absolute top-1/2 h-0.5 -translate-y-1/2" style="left:${p0}%;width:${Math.max(0, p1 - p0)}%;background:${x ? "#eb6834" : "repeating-linear-gradient(90deg,#eb6834 0 4px,transparent 4px 7px)"}"></div>
-      <div class="absolute top-1/2 w-2.5 h-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[#003058] ring-2 ring-white" style="left:${p0}%" title="Fecha del plan: ${nombreMes(a.m)}"></div>
+      <div class="absolute top-1/2 w-2.5 h-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[#003058] ring-2 ring-white" style="left:${p0}%" title="Fecha: ${nombreMes(a.m)}"></div>
       ${at && x ? `<div class="absolute top-1/2 w-2.5 h-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[#eb6834] ring-2 ring-white" style="left:${p1}%" title="Con atraso: ${nombreMes(x.m)}"></div>` : ""}
-      ${f.mejor ? `<div class="absolute top-1/2 ${f.mejor.m === a.m ? "w-4 h-4" : "w-3.5 h-3.5"} -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-[#003058]" style="left:${pos(f.mejor.m)}%" title="${f.mejor.m === a.m ? "La fecha del plan es la de mayor VAN" : `Fecha de mayor VAN: ${nombreMes(f.mejor.m)} (${mm(f.mejor.v - a.v, true)} sobre la fecha del plan)`}"></div>` : ""}</div>`; };
-  const FILTROS = [["todas", "Todas", () => true], ["plan", "En el plan", (f) => f.enPlan], ["decidido", "Decididos", (f) => f.tipo === "decidido"],
-    ["fuera", "Seguimiento y red mínima", (f) => f.tipo === "seguimiento" || f.tipo === "red"]];
-  const fil = APP._flexFiltro || "todas", ok = FILTROS.find(([k]) => k === fil)[2], ordenG = { decidido: 0, firme: 1, condicionado: 2, seguimiento: 3, red: 4 };
-  $("flex-filtro").innerHTML = FILTROS.map(([k, t, fn]) => `<button type="button" data-k="${k}" aria-pressed="${k === fil}">${t} (${F.filas.filter(fn).length})</button>`).join("");
-  $("flex-filtro").querySelectorAll("button").forEach((b) => (b.onclick = () => { APP._flexFiltro = b.dataset.k; pintarFlexibilidad(); }));
-  const filas = F.filas.map((f, i) => ({ f, d: difs[i] })).filter(({ f }) => ok(f))
-    .sort((a, b) => ordenG[a.f.tipo] - ordenG[b.f.tipo] || (a.f.atrasos[0].m < b.f.atrasos[0].m ? -1 : a.f.atrasos[0].m > b.f.atrasos[0].m ? 1 : 0));
+      ${f.mejor ? `<div class="absolute top-1/2 ${f.mejor.m === a.m ? "w-4 h-4" : "w-3.5 h-3.5"} -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-[#003058]" style="left:${pos(f.mejor.m)}%" title="${f.mejor.m === a.m ? "Es la fecha de mayor VAN" : `Fecha de mayor VAN: ${nombreMes(f.mejor.m)} (${mmM(f.mejor.v - a.v)})`}"></div>` : ""}</div>`; };
+  const ordenG = { decidido: 0, plan: 1, seguimiento: 3, red: 4 };
+  const filas = filasA.map((f, i) => ({ f, d: difs[i] })).sort((a, b) => ordenG[a.f.tipo] - ordenG[b.f.tipo] || (a.f.atrasos[0].m < b.f.atrasos[0].m ? -1 : a.f.atrasos[0].m > b.f.atrasos[0].m ? 1 : 0));
+  if (alc === "sede") APP._flexSel = APP._flexSede;
   if (!filas.some(({ f }) => f.id === APP._flexSel)) APP._flexSel = filas[0]?.f.id ?? null;
   const ejeAnos = `<div class="relative h-4 text-[10px] text-slate-400">${anos.filter((y, i) => anos.length <= 6 || i % 2 === 0).map((y) => `<span class="absolute -translate-x-1/2" style="left:${pos(`${y}-01`)}%">${y}</span>`).join("")}</div>`;
-  $("flex-tabla").innerHTML = !filas.length ? `<p class="text-slate-500">No hay sedes en este grupo.</p>` : `
+  $("flex-tabla").innerHTML = !filas.length ? `<p class="text-slate-500">Sin sedes.</p>` : `
     <div class="hidden md:grid grid-cols-12 gap-3 px-2 pb-1 text-[11px] font-semibold text-slate-500 border-b border-slate-200 items-end">
-      <span class="col-span-3">Sede</span><span class="col-span-5"><span class="flex gap-3 font-normal mb-1"><span class="inline-flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-full bg-[#003058] inline-block"></span>Fecha del plan (o mejor fecha)</span><span class="inline-flex items-center gap-1"><span class="w-3 h-3 rounded-full border-2 border-[#003058] inline-block"></span>Fecha de mayor VAN</span>${at ? `<span class="inline-flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-full bg-[#eb6834] inline-block"></span>Con ${at} año${at === 1 ? "" : "s"} de atraso</span>` : ""}</span>${ejeAnos}</span>
+      <span class="col-span-3">Sede</span><span class="col-span-5"><span class="flex flex-wrap gap-3 font-normal mb-1"><span class="inline-flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-full bg-[#003058] inline-block"></span>Fecha</span><span class="inline-flex items-center gap-1"><span class="w-3 h-3 rounded-full border-2 border-[#003058] inline-block"></span>Mayor VAN</span>${at ? `<span class="inline-flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-full bg-[#eb6834] inline-block"></span>Con atraso</span>` : ""}</span>${ejeAnos}</span>
       <span class="col-span-2 text-right">${at ? "Costo de postergar" : "VAN a tiempo"}</span><span class="col-span-2 text-right">Valor de esperar</span></div>
     ${filas.map(({ f, d }) => { const x = f.atrasos[at], o = f.hoy != null ? f.esperar - f.hoy : null;
       return `<button type="button" data-id="${esc(f.id)}" class="w-full grid grid-cols-12 gap-3 items-center text-left px-2 py-1.5 rounded-lg border ${f.id === APP._flexSel ? "border-[#003058] bg-slate-50" : "border-transparent hover:bg-slate-50"}">
-        <span class="col-span-12 md:col-span-3"><span class="font-medium text-slate-800">${esc(f.n)}</span> <span class="text-[10px] px-1.5 py-0.5 rounded ${ETQ_FLEX[f.tipo][1]}">${ETQ_FLEX[f.tipo][0]}</span></span>
+        <span class="col-span-12 md:col-span-3 min-w-0"><span class="font-medium text-slate-800">${esc(f.n)}</span> <span class="text-[10px] px-1.5 py-0.5 rounded ${ETQ_FLEX[f.tipo][1]}">${ETQ_FLEX[f.tipo][0]}</span></span>
         <span class="col-span-12 md:col-span-5">${linea(f)}</span>
-        <span class="col-span-6 md:col-span-2">${at ? (x ? `${barraDiv(d, maxD)}<div class="text-[11px] text-right ${color(d)}">${mm(d, true)}</div>` : `<div class="text-[11px] text-right text-slate-500">después de 2036</div>`) : `<div class="text-right">${mm(f.atrasos[0].v, true)}</div>`}</span>
-        <span class="col-span-6 md:col-span-2">${o == null ? `<div class="text-[11px] text-right text-slate-400">-</div>` : `${barraDiv(o, maxO)}<div class="text-[11px] text-right ${o > 0.5 ? "text-[#1f5fae] font-semibold" : "text-slate-500"}">${{ fecha: "cerrar en la fecha", tarde: `cerrar más tarde ${mm(o, true)}`, esperar: `esperar y decidir ${mm(o, true)}` }[f.rec]}</div>`}</span></button>`; }).join("")}`;
-  if (fil === "todas" && F.excluidas.length) $("flex-tabla").insertAdjacentHTML("beforeend", `<div class="mt-3 pt-2 border-t border-slate-100 text-[11px] text-slate-500">
-    <span class="font-semibold text-slate-600">Sin evaluar (${F.excluidas.length}):</span> ${F.excluidas.map((x) => `${esc(x.n)} (${esc(x.motivo)})`).join(" · ")}</div>`);
+        <span class="col-span-6 md:col-span-2 min-w-0">${at ? (x ? `${barraDiv(d, maxD)}<div class="text-[11px] text-right ${color(d)}">${mmM(d)}</div>` : `<div class="text-[11px] text-right text-slate-500">después de 2036</div>`) : `<div class="text-right">${mmM(f.atrasos[0].v)}</div>`}</span>
+        <span class="col-span-6 md:col-span-2 min-w-0">${o == null ? `<div class="text-[11px] text-right text-slate-400">${f.m1 ? "…" : "-"}</div>` : `${barraDiv(o, maxO)}<div class="text-[11px] text-right ${o > 0.5 ? "text-[#1f5fae] font-semibold" : "text-slate-500"}">${{ fecha: "cerrar en la fecha", tarde: `cerrar más tarde ${mmM(o)}`, esperar: `esperar y decidir ${mmM(o)}` }[f.rec]}</div>`}</span></button>`; }).join("")}`;
+  if (alc !== "sede" && F.excluidas.length) $("flex-tabla").insertAdjacentHTML("beforeend", `<div class="mt-3 pt-2 border-t border-slate-100 text-[11px] text-slate-500">
+    <span class="font-semibold text-slate-600">Sin evaluar:</span> ${F.excluidas.map((x) => `${esc(x.n)} (${esc(x.motivo)})`).join(", ")}</div>`);
   $("flex-tabla").querySelectorAll("button[data-id]").forEach((b) => (b.onclick = () => { APP._flexSel = b.dataset.id; pintarFlexibilidad(); }));
-  pintarDetalleFlex(F.filas.find((f) => f.id === APP._flexSel), at);
-  // Eje ajustado a los datos: las diferencias por atraso son de pocos puntos y con el eje desde cero no se ven
+  pintarDetalleFlex(filasA.find((f) => f.id === APP._flexSel), at);
   const pad = Math.max((Math.max(...totales) - Math.min(...totales)) * 0.35, Math.abs(totales[0]) * 0.005, 1);
-  if ($("flex-sub-plan")) $("flex-sub-plan").textContent = `Suma de los ${firmes.length} cierre${firmes.length === 1 ? "" : "s"} firme${firmes.length === 1 ? "" : "s"}. Haz clic en un punto para elegir el atraso.`;
-  const ctx = $("chartFlex");
+  if ($("flex-sub-plan")) $("flex-sub-plan").textContent = alc === "sede" ? quien : `Suma de ${quien}`;
   if (APP.chartFlex) APP.chartFlex.destroy();
-  APP.chartFlex = new Chart(ctx, { type: "line", data: { labels: ["A tiempo", "1 año", "2 años", "3 años"], datasets: [{ data: totales, borderColor: "#003058", backgroundColor: "#003058",
+  APP.chartFlex = new Chart($("chartFlex"), { type: "line", data: { labels: ["A tiempo", "1 año", "2 años", "3 años"], datasets: [{ data: totales, borderColor: "#003058", backgroundColor: "#003058",
     pointRadius: totales.map((_, i) => (i === at ? 7 : 4)), pointHoverRadius: 8, pointHitRadius: 18, borderWidth: 2, tension: 0.25 }] },
     options: { responsive: true, maintainAspectRatio: false, animation: false, onClick: (e, el) => { if (el.length) { APP._atraso = el[0].index; pintarFlexibilidad(); } },
       onHover: (e, el) => { e.native.target.style.cursor = el.length ? "pointer" : "default"; },
-      plugins: { legend: { display: false }, tooltip: { callbacks: { label: (it) => `${mm(it.parsed.y, true)}${it.dataIndex ? ` (${mm(it.parsed.y - totales[0], true)} frente a tiempo)` : ""}` } } },
-      scales: { x: { grid: { display: false }, offset: true }, y: { beginAtZero: false, suggestedMin: Math.min(...totales) - pad, suggestedMax: Math.max(...totales) + pad, grid: { color: "#E5E9EF" }, ticks: { callback: (v) => mm(v), maxTicksLimit: 6 } } } } });
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: (it) => `${mmM(it.parsed.y)}${it.dataIndex ? ` (${mmM(it.parsed.y - totales[0])} frente a tiempo)` : ""}` } } },
+      scales: { x: { grid: { display: false }, offset: true }, y: { beginAtZero: false, suggestedMin: Math.min(...totales) - pad, suggestedMax: Math.max(...totales) + pad, grid: { color: "#E5E9EF" }, ticks: { callback: (v) => mmM(v), maxTicksLimit: 6 } } } } });
 }
 function pintarSensibilidadTab() {
   if (!APP.est || !DASHBOARD_DATA || !$("sens-controles")) return;
   if (!APP._porId || !APP._alt) prepararCategorias();
   pintarSensVan();
-  calcularSensibilidad(pintarSensibilidad);
 }
-const ETQ_FLEX = { decidido: ["Decidido", "bg-slate-200 text-slate-800"], firme: ["Firme", "bg-[#003058] text-white"], condicionado: ["Cond.", "bg-[#c3d5ee] text-slate-800"],
+const ETQ_FLEX = { decidido: ["Decidido", "bg-slate-200 text-slate-800"], plan: ["Plan", "bg-[#003058] text-white"],
   seguimiento: ["Seguimiento", "bg-amber-100 text-amber-900"], red: ["Red mínima", "bg-white border border-slate-300 text-slate-600"] };
 // Detalle de un cierre en Flexibilidad: VAN segun el atraso y opcion de esperar un ano
 function pintarDetalleFlex(f, at) {
@@ -5879,23 +6740,23 @@ function pintarDetalleFlex(f, at) {
   APP.chartFlexSede?.destroy(); APP.chartFlexSede = null;
   if (!f) { caja.innerHTML = `<p class="text-xs text-slate-500">Elige un cierre para ver su detalle.</p>`; return; }
   const o = f.hoy != null ? f.esperar - f.hoy : null;
-  caja.innerHTML = `<div><div class="text-[11px] font-bold uppercase tracking-wide text-slate-500">Detalle de una sede · ${{ decidido: "cierre decidido", firme: "cierre firme", condicionado: "cierre condicionado", seguimiento: "en seguimiento", red: "red mínima" }[f.tipo]}</div>
+  caja.innerHTML = `<div><div class="text-[11px] font-bold uppercase tracking-wide text-slate-500">Detalle de una sede · ${{ decidido: "cierre decidido", plan: "cierre del plan", seguimiento: "en seguimiento", red: "red mínima" }[f.tipo]}</div>
       <div class="text-sm font-extrabold text-slate-900">${esc(f.n)}</div><div class="text-xs text-slate-600">${f.enPlan || f.tipo === "decidido" ? "Fecha del plan" : "Mejor fecha de cierre"}: ${nombreMes(f.atrasos[0].m)}</div></div>
     ${f.enPlan ? "" : `<div class="text-xs px-2 py-1.5 rounded bg-slate-100 text-slate-700">${f.tipo === "decidido" ? "Cierre decidido por la gerencia: su fecha no se evalúa, el VAN es de referencia."
-      : `No está en el plan de cierres: cerrarla en su mejor fecha da ${mm(f.atrasos[0].v, true)}${f.probRef != null ? `, con VAN positivo en el ${fmt.num(f.probRef * 100, 0)}% de los escenarios (mínimo ${fmt.num(probMin() * 100, 0)}%)` : ""}.`}</div>`}
+      : `No está en el plan de cierres: cerrarla en su mejor fecha da ${mmM(f.atrasos[0].v)}${f.probRef != null ? `, con VAN positivo en el ${fmt.num(f.probRef * 100, 0)}% de los escenarios (mínimo ${fmt.num(probMin() * 100, 0)}%)` : ""}.`}</div>`}
     <div><div class="text-xs font-semibold text-slate-700 mb-1">VAN de cerrar ${esc(f.n)} según el atraso</div><div class="relative h-40"><canvas id="chartFlexSede"></canvas></div></div>
     ${!f.mejor || !f.enPlan ? "" : `<div class="text-xs px-2 py-1.5 rounded bg-slate-100 text-slate-700">${f.mejor.m === f.atrasos[0].m ? "La fecha del plan es la de mayor VAN."
-      : `Fecha de mayor VAN: ${nombreMes(f.mejor.m)}, con ${mm(f.mejor.v - f.atrasos[0].v, true)} sobre la fecha del plan. ${f.mejor.m < f.atrasos[0].m && (f.mejor.prob ?? 1) < probMin()
+      : `Fecha de mayor VAN: ${nombreMes(f.mejor.m)}, con ${mmM(f.mejor.v - f.atrasos[0].v)} sobre la fecha del plan. ${f.mejor.m < f.atrasos[0].m && (f.mejor.prob ?? 1) < probMin()
         ? `El plan no la usa porque ahí el VAN es positivo solo en el ${fmt.num((f.mejor.prob ?? 0) * 100, 0)}% de los escenarios (mínimo ${fmt.num(probMin() * 100, 0)}%).`
         : (finz().tolerancia ?? 0) > 0 ? `El plan cierra antes porque acepta hasta ${Math.round(finz().tolerancia * 100)}% menos VAN para cerrar en la primera fecha posible.`
         : "El plan elige con el VAN promedio de la simulación, que es mayor en la fecha del plan."}`}</div>`}
     ${o == null ? `<p class="text-xs text-slate-500">No hay una ventana de contrato un año después para evaluar la espera.</p>` : `
     <div class="space-y-1.5"><div class="text-xs font-semibold text-slate-700">Esperar un año y decidir con la venta observada</div>
-      <div class="flex justify-between text-xs"><span class="text-slate-500">Cerrar en la fecha del plan</span><span class="font-semibold tabular-nums">${mm(f.hoy, true)}</span></div>
-      <div class="flex justify-between text-xs"><span class="text-slate-500">Esperar y decidir</span><span class="font-semibold tabular-nums">${mm(f.esperar, true)}</span></div>
-      <div class="flex justify-between text-xs border-t border-slate-200 pt-1.5"><span class="text-slate-500">Diferencia</span><span class="font-semibold tabular-nums ${o > 0.5 ? "text-[#1f5fae]" : "text-slate-500"}">${mm(o, true)}</span></div>
-      <div class="flex justify-between text-xs pl-3"><span class="text-slate-500">por cerrar más tarde</span><span class="tabular-nums">${mm(f.postergar, true)}</span></div>
-      <div class="flex justify-between text-xs pl-3"><span class="text-slate-500">por decidir con la venta observada</span><span class="tabular-nums">${mm(f.info, true)}</span></div>
+      <div class="flex justify-between text-xs"><span class="text-slate-500">Cerrar en la fecha del plan</span><span class="font-semibold tabular-nums">${mmM(f.hoy)}</span></div>
+      <div class="flex justify-between text-xs"><span class="text-slate-500">Esperar y decidir</span><span class="font-semibold tabular-nums">${mmM(f.esperar)}</span></div>
+      <div class="flex justify-between text-xs border-t border-slate-200 pt-1.5"><span class="text-slate-500">Diferencia</span><span class="font-semibold tabular-nums ${o > 0.5 ? "text-[#1f5fae]" : "text-slate-500"}">${mmM(o)}</span></div>
+      <div class="flex justify-between text-xs pl-3"><span class="text-slate-500">por cerrar más tarde</span><span class="tabular-nums">${mmM(f.postergar)}</span></div>
+      <div class="flex justify-between text-xs pl-3"><span class="text-slate-500">por decidir con la venta observada</span><span class="tabular-nums">${mmM(f.info)}</span></div>
       <div class="text-xs mt-1 px-2 py-1.5 rounded ${o > 0.5 ? "bg-[#e3eefb] text-[#1f3f6e]" : "bg-slate-100 text-slate-700"}">${{
         fecha: "Conviene cerrar en la fecha del plan: esperar no agrega valor.",
         tarde: "Conviene cerrar más tarde: casi todo lo que se gana al esperar viene de la fecha, no de la información nueva.",
@@ -5904,8 +6765,8 @@ function pintarDetalleFlex(f, at) {
   APP.chartFlexSede = new Chart($("chartFlexSede"), { type: "bar",
     data: { labels: et, datasets: [{ data: d, backgroundColor: d.map((v, i) => (i === at ? "#003058" : v != null && v < 0 ? "#e34948" : "#9fb4cf")), borderRadius: 4, barPercentage: 0.7 }] },
     options: { responsive: true, maintainAspectRatio: false, animation: false,
-      plugins: { legend: { display: false }, tooltip: { callbacks: { label: (it) => { const x = f.atrasos[it.dataIndex]; return x ? `${nombreMes(x.m)}: ${mm(x.v, true)}` : "después de 2036"; } } } },
-      scales: { x: { grid: { display: false } }, y: { grid: { color: "#E5E9EF" }, ticks: { callback: (v) => mm(v), maxTicksLimit: 4 } } } } });
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: (it) => { const x = f.atrasos[it.dataIndex]; return x ? `${nombreMes(x.m)}: ${mmM(x.v)}` : "después de 2036"; } } } },
+      scales: { x: { grid: { display: false } }, y: { grid: { color: "#E5E9EF" }, ticks: { callback: (v) => mmM(v), maxTicksLimit: 4 } } } } });
 }
 // =====================================================================
 // Sensibilidad del VAN a mano: el plan queda fijo (cierres y fechas del caso base) y se recalcula el VAN de cada cierre con
@@ -5928,18 +6789,103 @@ const SENS_PARAMS = [
 const SENS_COLOR = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#6250d6", "#e34948"];
 const sensRango = (d) => { const b = d.base(); return [Math.min(d.min, b), Math.max(d.max, b)]; };
 const sensValsBase = () => Object.fromEntries(SENS_PARAMS.map((d) => [d.k, d.base()]));
-// Cierres del plan con su base de calculo; se recuerda mientras no cambie el calendario
+// Sedes a evaluar en Sensibilidad segun el alcance (plan, plan con decididos o una sede), con su base de calculo en su
+// fecha del plan (o su mejor fecha si no cierra) y las receptoras abiertas en esa fecha. No cambia el plan.
 function basesSens() {
   calendarioCierres();
-  if (APP._sensB?.clave === APP._calMemo.clave) return APP._sensB.filas;
-  const cal = APP._calMemo.cal, G = gruposPlan(), inicio = sumarMeses(historia().corte, 1);
-  const filas = [...G.firmes, ...G.condicionados].map(([id, k]) => {
-    const s = APP._porId[id];
-    const rec = conUso(DASHBOARD_DATA.huff_ids.filter((j) => j !== id && !(cal[j] && cal[j].mes <= k.mes)), id, k.mes, APP._calMemo.libro);
-    return { id, n: nombreLindo(s.nombre), firme: k.firme, mes: k.mes, B: baseCierre(s, rec, inicio, new Set()) };
-  });
-  APP._sensB = { clave: APP._calMemo.clave, filas };
+  const alc = APP._sensAlc || "plan", clave = JSON.stringify([APP._calMemo.clave, alc, APP._sensSede]);
+  if (APP._sensB?.clave === clave && APP._sensB.est === APP.est) return APP._sensB.filas;
+  const cal = APP._calMemo.cal, M = APP._calMemo.mantiene, inicio = sumarMeses(historia().corte, 1), fin = finPlan();
+  const base = (id, mes) => {
+    const s = APP._porId[id], t = cal[id] ? mes : fin;
+    const rec = conUso(DASHBOARD_DATA.huff_ids.filter((j) => j !== id && !(cal[j] && cal[j].mes <= t)), id, t, APP._calMemo.libro);
+    return { id, n: nombreLindo(s.nombre), mes, B: baseCierre(s, rec, inicio, new Set()) };
+  };
+  const evaluable = (id) => APP._porId[id] && DASHBOARD_DATA.locales[id] && !sinGastos(APP._porId[id]);
+  let filas;
+  if (alc === "sede") {
+    const id = APP._sensSede, k = cal[id], x = M[id], mes = k?.mes || x?.mes;
+    filas = id && mes && evaluable(id) ? [base(id, mes)] : [];
+  } else {
+    filas = Object.entries(cal).filter(([id, k]) => (k.tipo === "propuesto" || alc === "todos") && evaluable(id))
+      .sort((a, b) => (a[1].mes < b[1].mes ? -1 : 1)).map(([id, k]) => base(id, k.mes));
+  }
+  APP._sensB = { clave, est: APP.est, filas };
   return filas;
+}
+// Monte Carlo de Sensibilidad: los mismos sorteos del plan (tasa, gastos, persistencia y costo online comunes; retencion,
+// tendencia, ruido de la venta y salida propios de cada sede), con N escenarios propios. Los deslizadores corren el centro.
+function sorteosSens(B, N) {
+  const rC = tasaEfectiva(), foC = APP.factorCostoOnline ?? 0.15, am = amortiguacion();
+  const cg = JSON.stringify([N, rC, foC, am, SIM.shockG, SIM.spreadCostos]);
+  if (APP._sensSorteos?.clave !== cg) {
+    const prng = simMulberry32(4242), g = [];
+    for (let i = 0; i < N; i++) g.push({ rA: simSampleTriangular(prng, Math.max(0.02, rC - 0.015), rC, rC + 0.015), dc: SIM.spreadCostos + simSampleTriangular(prng, -0.01, 0, 0.015),
+      phi: Math.max(0.5, am - 0.10 * prng()), fo: simSampleTriangular(prng, Math.min(0.10, foC), foC, Math.max(0.30, foC)) });
+    APP._sensSorteos = { clave: cg, g, porSede: new Map() };
+  }
+  const S = APP._sensSorteos, e = B.e, cs = [B.s.sede_id, e.physProb, e.physFull, B.md, SIM.escalaMf].join("|");
+  if (S.porSede.has(cs)) return S.porSede.get(cs);
+  let h = 2166136261; for (const ch of B.s.sede_id + "|sens") h = Math.imul(h ^ ch.charCodeAt(0), 16777619);
+  const prng = simMulberry32(h >>> 0), norm = simCreateBoxMuller(prng);
+  const m3 = Math.min(1, e.physProb * SIM.escalaMf), full = Math.max(m3, Math.min(1, e.physFull * SIM.escalaMf));
+  const out = S.g.map((x) => ({ ...x, mf: simSamplePert(prng, norm, 0.6 * m3, m3, full), md: simSamplePert(prng, norm, Math.min(0.03, B.md), B.md, Math.max(0.18, B.md)),
+    dg: Math.max(-0.07, Math.min(0.07, norm(SIM.shockG, 0.025))), eps: Array.from({ length: B.nAnos }, () => norm(0, 1)), uSal: prng(), kv: 1 }));
+  S.porSede.set(cs, out);
+  return out;
+}
+const pSens = (B, vals) => { const p = { rA: tasaEfectiva(), dc: 0, phi: amortiguacion(), fo: APP.factorCostoOnline ?? 0.15, mf: B.e.physProb, md: B.md, dg: 0, eps: null, uSal: null, kv: 1 };
+  for (const d of SENS_PARAMS) d.ap(p, vals[d.k], B); return p; };
+// VAN de cada escenario (suma de las sedes evaluadas), en tandas para no congelar la pagina
+function mcSens(filas, vals, N, alAvanzar) {
+  const vec = new Float64Array(N), vb = sensValsBase(), tareas = filas.map((f) => {
+    const p0 = pSens(f.B, vb), pS = pSens(f.B, vals), P = sorteosSens(f.B, N);
+    return { f, P, d: { rA: pS.rA - p0.rA, dc: pS.dc - p0.dc, phi: pS.phi - p0.phi, fo: pS.fo - p0.fo, md: pS.md - p0.md, dg: pS.dg - p0.dg }, mfx: p0.mf > 0 ? pS.mf / p0.mf : 1, kv: pS.kv };
+  });
+  let i = 0;
+  return new Promise((ok) => {
+    const paso = () => {
+      const fin = Math.min(N, i + 400);
+      for (; i < fin; i++) for (const T of tareas) {
+        const x = T.P[i], p = { ...x, rA: x.rA + T.d.rA, dc: x.dc + T.d.dc, phi: Math.max(0.5, Math.min(1, x.phi + T.d.phi)), fo: Math.max(0, Math.min(1, x.fo + T.d.fo)),
+          mf: Math.min(1, x.mf * T.mfx), md: Math.max(0, Math.min(0.95, x.md + T.d.md)), dg: x.dg + T.d.dg, kv: T.kv };
+        vec[i] += vanDesdeBase(T.f.B, [T.f.mes], p).opciones[0].van;
+      }
+      alAvanzar?.(i / N);
+      if (i < N) setTimeout(paso, 0); else ok(vec);
+    };
+    paso();
+  });
+}
+const resumenVec = (v) => { const x = Float64Array.from(v).sort(), N = x.length, q = (f) => x[Math.min(N - 1, Math.floor(N * f))];
+  let pos = 0; for (const y of x) if (y > 0) pos++; const c = x.slice(0, Math.max(1, Math.floor(N * 0.05)));
+  return { p10: q(0.1), p50: q(0.5), p90: q(0.9), prob: pos / N, cvar5: c.reduce((a, y) => a + y, 0) / c.length, x }; };
+async function actualizarSensMC() {
+  const filas = basesSens(), N = APP._sensN || 5000, vals = APP._sensVals || sensValsBase(), est = $("sens-mc-estado");
+  if (!$("sens-mc-tabla")) return;
+  const tok = (APP._sensMCtok = (APP._sensMCtok || 0) + 1);
+  if (!filas.length) { $("sens-mc-tabla").innerHTML = ""; APP.chartSensMC?.destroy(); APP.chartSensMC = null; est.textContent = ""; return; }
+  const cb = JSON.stringify([APP._sensB.clave, N, tasaEfectiva(), APP.factorCostoOnline, amortiguacion(), SIM.shockG, SIM.spreadCostos, SIM.escalaMf]);
+  const avance = (f) => { if (tok === APP._sensMCtok) est.textContent = `calculando ${fmt.num(f * 100, 0)}%`; };
+  if (APP._sensMCbase?.clave !== cb) { const v = await mcSens(filas, sensValsBase(), N, avance); if (tok !== APP._sensMCtok) return; APP._sensMCbase = { clave: cb, r: resumenVec(v) }; }
+  const vE = await mcSens(filas, vals, N, avance); if (tok !== APP._sensMCtok) return;
+  const b = APP._sensMCbase.r, e = resumenVec(vE);
+  est.textContent = `${fmt.num(N, 0)} escenarios`;
+  const pc = (v) => (v > 0.995 && v < 1 ? `${fmt.num(v * 100, 1)}%` : `${fmt.num(v * 100, 0)}%`), col = (v) => (v < -0.5 ? "text-rose-700" : "");
+  const filasT = [["Mediana (P50)", b.p50, e.p50, mmM], ["P10", b.p10, e.p10, mmM], ["P90", b.p90, e.p90, mmM], ["Escenarios con VAN positivo", b.prob, e.prob, pc], ["Promedio del peor 5%", b.cvar5, e.cvar5, mmM]];
+  $("sens-mc-tabla").innerHTML = `<thead><tr class="text-slate-500 border-b border-slate-200"><th class="text-left font-semibold py-1"></th><th class="text-right font-semibold py-1">Caso base</th><th class="text-right font-semibold py-1">Escenario</th><th class="text-right font-semibold py-1">Cambio</th></tr></thead><tbody>
+    ${filasT.map(([n, x, y, f]) => `<tr class="border-t border-slate-100"><td class="py-1 text-slate-700">${n}</td><td class="py-1 text-right ${col(x)}">${f(x)}</td><td class="py-1 text-right font-semibold ${col(y)}">${f(y)}</td>
+      <td class="py-1 text-right ${y - x < -1e-9 ? "text-rose-700" : y - x > 1e-9 ? "text-[#1f5fae]" : "text-slate-400"}">${Math.abs(y - x) < (f === pc ? 0.0005 : 0.5) ? "igual" : f === pc ? `${y > x ? "+" : "−"}${fmt.num(Math.abs(y - x) * 100, 1)} pts` : mmM(y - x)}</td></tr>`).join("")}</tbody>`;
+  // Histograma: caso base y escenario sobre los mismos tramos
+  const lo = Math.min(b.x[0], e.x[0]), hi = Math.max(b.x[b.x.length - 1], e.x[e.x.length - 1]), nb = 40, w = (hi - lo) / nb || 1;
+  const hist = (x) => { const c = new Array(nb).fill(0); for (const y of x) c[Math.min(nb - 1, Math.floor((y - lo) / w))]++; return c; };
+  const cen = Array.from({ length: nb }, (_, k) => lo + (k + 0.5) * w);
+  APP.chartSensMC?.destroy();
+  APP.chartSensMC = new Chart($("chartSensMC"), { type: "bar", data: { labels: cen.map((c) => mmM(c)), datasets: [
+      { label: "Caso base", data: hist(b.x), backgroundColor: "rgba(148,163,184,0.55)", barPercentage: 1, categoryPercentage: 1, grouped: false },
+      { label: "Escenario", data: hist(e.x), backgroundColor: cen.map((c) => (c < 0 ? "rgba(227,73,72,0.6)" : "rgba(0,48,88,0.6)")), barPercentage: 1, categoryPercentage: 1, grouped: false }] },
+    options: { responsive: true, maintainAspectRatio: false, animation: false, plugins: { legend: { position: "top", align: "end", labels: { boxWidth: 12, font: { size: 11 } } } },
+      scales: { x: { grid: { display: false }, ticks: { maxTicksLimit: 8, maxRotation: 0, font: { size: 10 } } }, y: { grid: { color: "#E5E9EF" }, ticks: { font: { size: 10 } } } } } });
 }
 function vanesSens(filas, vals) {
   return filas.map(({ B, mes }) => {
@@ -5953,10 +6899,19 @@ function pintarSensVan() {
   if (!$("sens-controles")) return;
   const vb = sensValsBase();
   if (!APP._sensVals) APP._sensVals = { ...vb };
-  const alc = soloFirmes() ? "FASE_1" : "FASE_1_2";
-  $("sens-alcance").innerHTML = [["FASE_1", "Cierres firmes"], ["FASE_1_2", "Firmes y condicionados"]].map(([k, t]) => `<button type="button" data-k="${k}" aria-pressed="${k === alc}">${t}</button>`).join("");
-  $("sens-alcance").querySelectorAll("button").forEach((b) => (b.onclick = () => { SIM.alcance = b.dataset.k; pintarSensVan(); }));
   $("sens-reset").onclick = () => { APP._sensVals = { ...vb }; pintarSensVan(); };
+  const alc = APP._sensAlc || "plan", selS = $("sens-sede");
+  document.querySelectorAll('input[name="sensAlc"]').forEach((r) => { r.checked = r.value === alc; r.onchange = () => { APP._sensAlc = r.value; if (r.value === "sede" && !APP._sensSede) APP._sensSede = selS.value; pintarSensVan(); }; });
+  if (selS) {
+    const cal = calendarioCierres(), M = APP._calMemo.mantiene;
+    const ops = Object.keys(DASHBOARD_DATA.locales).filter((id) => APP._porId[id] && (cal[id] || M[id]?.mes) && !sinGastos(APP._porId[id]))
+      .map((id) => [id, nombreLindo(APP._porId[id].nombre)]).sort((a, b) => a[1].localeCompare(b[1]));
+    selS.innerHTML = ops.map(([id, n]) => `<option value="${id}">${esc(n)}</option>`).join("");
+    if (!APP._sensSede) APP._sensSede = ops[0]?.[0];
+    selS.value = APP._sensSede; selS.hidden = alc !== "sede";
+    selS.onchange = () => { APP._sensSede = selS.value; pintarSensVan(); };
+  }
+  if ($("sens-n")) { $("sens-n").value = String(APP._sensN || 5000); $("sens-n").onchange = () => { APP._sensN = +$("sens-n").value; actualizarSensMC(); }; }
   $("sens-controles").innerHTML = SENS_PARAMS.map((d) => {
     const [lo, hi] = sensRango(d), v = APP._sensVals[d.k], mov = Math.abs(v - vb[d.k]) > 1e-9;
     return `<label class="block space-y-1 bg-white p-2.5 rounded-lg border ${mov ? "border-[#2a78d6]" : "border-slate-200"}" data-k="${d.k}">
@@ -5972,14 +6927,16 @@ function pintarSensVan() {
       el.classList.toggle("border-[#2a78d6]", Math.abs(+inp.value - vb[d.k]) > 1e-9);
       el.classList.toggle("border-slate-200", Math.abs(+inp.value - vb[d.k]) <= 1e-9);
       if (!APP._sensRaf) APP._sensRaf = requestAnimationFrame(() => { APP._sensRaf = null; actualizarSensVan(); });
+      clearTimeout(APP._sensMCt); APP._sensMCt = setTimeout(actualizarSensMC, 350);
     };
   });
   actualizarSensVan();
+  actualizarSensMC();
 }
 function actualizarSensVan() {
   if (!APP.est || !DASHBOARD_DATA || !$("sens-kpis")) return;
   if (!APP._porId || !APP._alt) prepararCategorias();
-  const filas = basesSens().filter((f) => (soloFirmes() ? f.firme : true)), vals = APP._sensVals, vb = sensValsBase();
+  const filas = basesSens(), vals = APP._sensVals, vb = sensValsBase();
   const dato = (k, v, cls = "", sub = "") => `<div><dt class="text-xs text-slate-500">${k}</dt><dd class="font-semibold text-lg tabular-nums mt-0.5 ${cls}">${v}</dd>${sub ? `<dd class="text-[11px] text-slate-500">${sub}</dd>` : ""}</div>`;
   if (!filas.length) {
     $("sens-kpis").innerHTML = dato("VAN del plan", "-", "", "No hay cierres en el plan con estos filtros.");
@@ -5991,11 +6948,12 @@ function actualizarSensVan() {
   const tBase = vBase.reduce((a, v) => a + v, 0), tEsc = vEsc.reduce((a, v) => a + v, 0), dif = tEsc - tBase;
   const negB = vBase.filter((v) => v < 0).length, negE = vEsc.filter((v) => v < 0).length;
   const color = (v) => (v > 0.5 ? "text-emerald-800" : v < -0.5 ? "text-rose-800" : "");
-  $("sens-kpis").innerHTML = dato("VAN del plan, caso base", mm(tBase, true), "", `${filas.length} cierre${filas.length === 1 ? "" : "s"}`)
-    + dato("VAN del plan, escenario", mm(tEsc, true), color(tEsc))
-    + dato("Cambio frente al caso base", Math.abs(dif) < 0.5 ? "-" : mm(dif, true), color(dif), Math.abs(tBase) > 0.5 && Math.abs(dif) >= 0.5 ? `${signo(dif / Math.abs(tBase) * 100, 0, "%")}` : "")
+  const qn = APP._sensAlc === "sede" ? filas[0].n : APP._sensAlc === "todos" ? "plan con decididos" : "plan";
+  $("sens-kpis").innerHTML = dato(`VAN ${APP._sensAlc === "sede" ? "de " : "del "}${qn}, caso base`, mmM(tBase), "", APP._sensAlc === "sede" ? `cierre en ${nombreMes(filas[0].mes)}` : `${filas.length} cierres`)
+    + dato("Escenario", mmM(tEsc), color(tEsc))
+    + dato("Cambio frente al caso base", Math.abs(dif) < 0.5 ? "-" : mmM(dif), color(dif), Math.abs(tBase) > 0.5 && Math.abs(dif) >= 0.5 ? `${signo(dif / Math.abs(tBase) * 100, 0, "%")}` : "")
     + dato("Cierres con VAN negativo", `${negE} de ${filas.length}`, negE > negB ? "text-rose-800" : "", negB ? `${negB} en el caso base` : "ninguno en el caso base");
-  const ejes = { grid: { color: "#E5E9EF" }, ticks: { callback: (v) => mm(v), maxRotation: 0, maxTicksLimit: 6 } };
+  const ejes = { grid: { color: "#E5E9EF" }, ticks: { callback: (v) => mmM(v), maxRotation: 0, maxTicksLimit: 6 } };
   // Tornado: cada supuesto al minimo y al maximo de su rango, el resto como en el escenario
   const T = SENS_PARAMS.map((d, i) => {
     const [lo, hi] = sensRango(d), l = sumaSens(filas, { ...vals, [d.k]: lo }), h = sumaSens(filas, { ...vals, [d.k]: hi });
@@ -6028,7 +6986,7 @@ function actualizarSensVan() {
   $("sens-sedes-caja").style.height = `${Math.max(160, 24 * orden.length + 70)}px`;
   APP.chartSensSedes?.destroy();
   APP.chartSensSedes = new Chart($("chartSensSedes"), { type: "bar",
-    data: { labels: orden.map((o) => `${o.f.n}${o.f.firme ? "" : " (cond.)"}`), datasets: [
+    data: { labels: orden.map((o) => o.f.n), datasets: [
       { label: "Caso base", data: orden.map((o) => o.b), backgroundColor: "#c9ced6", borderRadius: 4, barPercentage: 0.85, categoryPercentage: 0.8 },
       { label: "Escenario", data: orden.map((o) => o.e), backgroundColor: orden.map((o) => (o.e < 0 ? "#e34948" : "#2a78d6")), borderRadius: 4, barPercentage: 0.85, categoryPercentage: 0.8 }] },
     options: { indexAxis: "y", responsive: true, maintainAspectRatio: false, animation: false,
@@ -6057,5 +7015,5 @@ function pintarDobleSens(filas, tEsc, T) {
   $("sens-doble").innerHTML = `<thead><tr class="border-b border-slate-200">${th(`${esc(A.n)} ↓ / ${esc(Bp.n)} →`, "text-left")}${nb.map((b) => th(Bp.txt(b))).join("")}</tr></thead><tbody>
     ${M.map((fila, i) => `<tr class="border-b border-slate-100"><td class="py-1.5 pr-3 font-semibold text-slate-600 whitespace-nowrap">${A.txt(na[i])}</td>${fila.map((v, j) => {
       const actual = i === 2 && (nb.length === 1 || j === 2);
-      return `<td class="py-1.5 px-3 text-right whitespace-nowrap text-slate-900 ${actual ? "font-bold outline outline-2 outline-[#1f2937] -outline-offset-2" : ""}" style="background:${fondo(v)}">${mm(v, true)}</td>`; }).join("")}</tr>`).join("")}</tbody>`;
+      return `<td class="py-1.5 px-3 text-right whitespace-nowrap text-slate-900 ${actual ? "font-bold outline outline-2 outline-[#1f2937] -outline-offset-2" : ""}" style="background:${fondo(v)}">${mmM(v)}</td>`; }).join("")}</tr>`).join("")}</tbody>`;
 }

@@ -47,6 +47,25 @@ self.onmessage = async (e) => {
     } else if (m.tipo === "tiempos") {
       py.globals.set("entrada_t", m.entrada);
       postMessage({ tipo: "tiempos", json: py.runPython("from sedes import ui_api\nui_api.tiempos_metro(entrada_t)") });
+    } else if (m.tipo === "excel") {
+      // Excel del plan con formato, graficos y formulas (openpyxl); se cargan las librerias la primera vez
+      if (!self._openpyxl) {
+        // Pillow solo dibuja los logos y openpyxl lo detecta al importarse: va primero. Sin el, el libro sale sin logos
+        try { await py.loadPackage(["pillow"]); } catch (e) { /* sin logos */ }
+        // openpyxl viene incrustado en la herramienta (sin internet); si no esta, se baja de PyPI
+        try {
+          if (!m.zip) throw new Error("sin zip");
+          const bin = atob(m.zip), u8 = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+          py.FS.writeFile("/home/pyodide/openpyxl.zip", u8);
+          py.runPython("import sys\nif '/home/pyodide/openpyxl.zip' not in sys.path: sys.path.insert(0, '/home/pyodide/openpyxl.zip')\nimport openpyxl");
+        } catch (e) {
+          await py.loadPackage(["micropip"]);
+          await py.pyimport("micropip").install(["openpyxl"]);
+        }
+        self._openpyxl = true;
+      }
+      py.globals.set("entrada_excel", m.entrada);
+      postMessage({ tipo: "excel", b64: py.runPython("from sedes import excel_plan\nexcel_plan.construir_b64(entrada_excel)") });
     } else if (m.tipo === "analizar") {
       postMessage({ tipo: "estado", texto: "Leyendo hojas y cruzando datos" });
       py.globals.set("libro_json", m.libro);

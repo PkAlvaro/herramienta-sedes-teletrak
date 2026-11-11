@@ -13,6 +13,24 @@ RAIZ = Path(__file__).parent
 EXCLUIR = {"__main__.py", "geocodificar.py", "plantilla.py", "preparar_censo.py", "sintetico.py", "sintetico_rentabilidad.py"}
 
 
+def zip_openpyxl():
+    """openpyxl y et_xmlfile del entorno local en un zip (base64); None si no estan instalados."""
+    try:
+        import et_xmlfile
+        import openpyxl
+    except ImportError:
+        return None
+    import io
+    import zipfile
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as z:
+        for mod in (openpyxl, et_xmlfile):
+            base = Path(mod.__file__).parent
+            for f in sorted(base.rglob("*.py")):
+                z.write(f, f.relative_to(base.parent).as_posix())
+    return base64.b64encode(buf.getvalue()).decode()
+
+
 def construir(destino=RAIZ / "herramienta_sedes.html"):
     fuentes = {f"sedes/{p.name}": p.read_text(encoding="utf-8")
                for p in sorted((RAIZ / "sedes").glob("*.py")) if p.name not in EXCLUIR}
@@ -23,10 +41,22 @@ def construir(destino=RAIZ / "herramienta_sedes.html"):
     worker = (RAIZ / "ui" / "worker.js").read_text(encoding="utf-8")
     assert "</script" not in worker
     html = html.replace("__FUENTES__", js_fuentes, 1).replace("__WORKER__", worker, 1)
+    # Coordenadas fijas de las sedes (solo en el repo privado; sin el archivo se geocodifica en el navegador)
+    coords = RAIZ / "ui" / "coordenadas_fijas.json"
+    if coords.exists():
+        html = html.replace("/*__COORDS__*/{}", json.dumps(json.loads(coords.read_text(encoding="utf-8"))), 1)
+    # Tiempos de viaje fijos (rutas reales de la corrida del informe; solo en el repo privado)
+    tiempos = RAIZ / "ui" / "tiempos_fijos.json"
+    if tiempos.exists():
+        html = html.replace("/*__TIEMPOS__*/null", json.dumps(json.loads(tiempos.read_text(encoding="utf-8")), separators=(",", ":")).replace("</", "<\\/"), 1)
     # Logos de Teletrak e Hipodromo Chile, incrustados (uso local autorizado)
     for clave, archivo in (("__LOGO_TELETRAK__", "teletrak.png"), ("__LOGO_HIPODROMO__", "hipodromo_chile.png"), ("__ICONO__", "icono.png")):
         datos = base64.b64encode((RAIZ / "ui" / "marca" / archivo).read_bytes()).decode()
         html = html.replace(clave, "data:image/png;base64," + datos, 1)
+    # openpyxl (Python puro) incrustado: el Excel con formato se arma sin descargar nada de PyPI
+    zip_oxl = zip_openpyxl()
+    if zip_oxl:
+        html = html.replace("</body>", f'<script type="text/plain" id="zip-openpyxl">{zip_oxl}</script>\n</body>', 1)
     destino.write_text(html, encoding="utf-8")
     return destino, len(html)
 

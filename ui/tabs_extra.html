@@ -4,12 +4,11 @@
       <!-- Cabecera del modal -->
       <div class="px-6 py-4 border-b border-slate-200 flex items-center justify-between bg-slate-50">
         <div>
-          <h2 class="!mb-0 text-base font-extrabold text-[#1F2937]">Ajustes del Sistema e Informe de Carga</h2>
-          <p class="text-xs text-slate-500 mt-0.5">Diagnóstico de validación de datos, inconsistencias y configuración</p>
+          <h2 class="!mb-0 text-base font-extrabold text-[#1F2937]">Ajustes</h2>
         </div>
         <div class="flex items-center gap-2">
           <button type="button" class="px-3 py-1.5 rounded-lg text-xs font-bold bg-[#003058] hover:bg-[#002444] text-white shadow-2xs transition-all cursor-pointer" onclick="if(window.mostrarPantallaCarga) window.mostrarPantallaCarga()">
-            Cargar otro archivo Excel / Cambiar análisis
+            Cargar otro Excel
           </button>
           <button type="button" class="px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-200 hover:bg-slate-300 text-slate-700 transition-all cursor-pointer" onclick="if(window.cerrarModalAjustes) window.cerrarModalAjustes()">
             Cerrar
@@ -44,6 +43,7 @@
       <div class="grid grid-cols-1 xl:grid-cols-12 gap-5">
         <div class="xl:col-span-8 mapa-sticky">
           <div id="mapa"></div>
+          <div id="red-pres" class="pres-only"></div>
           <div class="flex flex-wrap items-center gap-3 mt-2">
             <div class="leyenda !mt-0 flex-1" id="leyenda"></div>
           </div>
@@ -72,147 +72,82 @@
   </section>
 
   <section class="tab space-y-5" id="tab-segmentos" hidden>
-    <!-- CABECERA DE LA PESTAÑA -->
-    <div class="card space-y-4">
-      <div class="flex flex-col md:flex-row items-start md:items-center justify-between gap-3 pb-3 border-b border-slate-100">
-        <div>
-          <div class="flex items-center gap-2">
-            <h2 class="!mb-0 text-base font-extrabold text-[#1F2937]">Estrategia y Portafolio</h2>
-            <span class="px-2 py-0.5 text-[11px] font-bold rounded bg-slate-100 text-[#003058] border border-slate-200">Según el plan por VAN</span>
-          </div>
-          <p class="text-xs text-slate-500 mt-0.5">
-            Cada sede según el plan: cerrar o mantener, decidido por el VAN del cierre.
-          </p>
-        </div>
-        <div class="flex flex-wrap items-center gap-2">
-          <button class="px-3 py-1.5 rounded-lg text-xs font-bold bg-[#003058] hover:bg-[#002444] text-white shadow-2xs transition-all cursor-pointer" onclick="aplicarCierresEstrategicosAVAN()" title="Marca en el Consolidado de VAN los locales clasificados para cierre">
-            Simular el plan en Demanda y VAN
-          </button>
-          <button class="btn-s" id="btn-csv-estrategia" onclick="descargarCSVEstrategia()">Exportar CSV</button>
-        </div>
+    <div id="est-pres" class="pres-only"></div>
+    <div class="card">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <h2 class="!mb-0 text-base font-extrabold text-[#1F2937]">Estrategia y Portafolio</h2>
+        <button class="px-3 py-1.5 rounded-lg text-xs font-bold bg-[#003058] hover:bg-[#002444] text-white shadow-2xs transition-all cursor-pointer" onclick="aplicarCierresEstrategicosAVAN()">Ver el plan en Demanda y VAN</button>
       </div>
-
-      <!-- Spans ocultos de KPIs del Score para compatibilidad con JS -->
       <div class="hidden">
-        <span id="kpiPortafolioTotal">0</span>
-        <span id="kpiPortafolioAlto">0</span>
-        <span id="kpiPortafolioMedio">0</span>
-        <span id="kpiPortafolioBajo">0</span>
-        <span id="kpiPortafolioZonaGris">0</span>
+        <span id="kpiPortafolioTotal">0</span><span id="kpiPortafolioAlto">0</span><span id="kpiPortafolioMedio">0</span><span id="kpiPortafolioBajo">0</span><span id="kpiPortafolioZonaGris">0</span>
       </div>
     </div>
 
-    <!-- 4 TARJETAS DE ACCIÓN ESTRATÉGICA -->
-    <div class="grid grid-cols-1 md:grid-cols-4 gap-3.5">
-      <div class="card border-l-4 border-l-[#1F2937] hover:shadow-md transition-shadow cursor-pointer" onclick="filtrarArquetipo('DECIDIDO')" id="cardArqDecidido">
-        <div class="flex items-center justify-between">
-          <span class="text-xs font-bold text-[#1F2937] uppercase tracking-wider">Cierres decididos</span>
-          <span class="px-2 py-0.5 text-xs font-extrabold rounded-full bg-[#F3F4F6] text-[#1F2937] border border-[#D1D5DB]" id="cntArqDecidido">0</span>
-        </div>
-        <p class="text-[11px] text-[#496276] mt-2">Resueltos por la gerencia: son un hecho.</p>
-      </div>
+    <div class="grid grid-cols-2 md:grid-cols-5 gap-3" id="est-tarjetas"></div>
 
-      <div class="card border-l-4 border-l-[#C2410C] hover:shadow-md transition-shadow cursor-pointer" onclick="filtrarArquetipo('CERRAR')" id="cardArqCerrar">
-        <div class="flex items-center justify-between">
-          <span class="text-xs font-bold text-[#C2410C] uppercase tracking-wider">Cierres firmes</span>
-          <span class="px-2 py-0.5 text-xs font-extrabold rounded-full bg-[#FDF3D1] text-[#C2410C] border border-[#D99A00]" id="cntArqCerrar">0</span>
-        </div>
-        <p class="text-[11px] text-[#496276] mt-2">VAN positivo hoy: cierran en su ventana de contrato hasta 2029.</p>
-      </div>
-
-      <div class="card border-l-4 border-l-[#496276] hover:shadow-md transition-shadow cursor-pointer" onclick="filtrarArquetipo('TRANSFORMAR')" id="cardArqTransformar">
-        <div class="flex items-center justify-between">
-          <span class="text-xs font-bold text-[#496276] uppercase tracking-wider">Red mínima</span>
-          <span class="px-2 py-0.5 text-xs font-extrabold rounded-full bg-[#F1F5F9] text-[#496276] border border-[#CBD5E1]" id="cntArqTransformar">0</span>
-        </div>
-        <p class="text-[11px] text-[#496276] mt-2">Se mantienen como están: cerrarlas no conviene. Renegociar si el arriendo pasa del 4% de la venta.</p>
-      </div>
-
-      <div class="card border-l-4 border-l-[#003058] hover:shadow-md transition-shadow cursor-pointer" onclick="filtrarArquetipo('FORTALECER')" id="cardArqFortalecer">
-        <div class="flex items-center justify-between">
-          <span class="text-xs font-bold text-[#7C2D12] uppercase tracking-wider">Cierres condicionados</span>
-          <span class="px-2 py-0.5 text-xs font-extrabold rounded-full bg-[#E8EEF5] text-[#003058] border border-[#D1DCE8]" id="cntArqFortalecer">0</span>
-        </div>
-        <p class="text-[11px] text-[#496276] mt-2">Cierran cuando su venta baja del disparador. Se revisan una vez al año.</p>
-      </div>
-    </div>
-
-    <!-- TABLA MAESTRA DEL PORTAFOLIO -->
     <div class="card space-y-3">
-      <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 border-b border-slate-100 pb-2">
+      <p class="text-sm font-bold text-slate-800">Una sede cierra si cerrarla crea valor y además rinde poco frente al resto de la red.</p>
+      <div id="est-cruce" class="overflow-x-auto"></div>
+    </div>
+
+    <details class="card space-y-3">
+      <summary class="cursor-pointer text-sm font-extrabold text-slate-800">Cómo se mide si una sede rinde poco frente a la red</summary>
+      <p class="text-xs text-slate-600 mt-2" id="est-formula"></p>
+      <div class="space-y-2 bg-slate-50 p-3 rounded-xl border border-slate-200">
+        <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+          <span class="text-xs font-bold text-slate-700">Pesos del score <span class="font-normal text-[#C2410C]">cambian el plan</span></span>
+          <div class="flex flex-wrap gap-1.5">
+            <button onclick="setEscenarioScore('base')" class="px-2.5 py-1 text-[11px] font-semibold rounded-md border border-slate-300 bg-white hover:bg-slate-100 text-slate-800 transition-all cursor-pointer active-pill" id="btnEscBase">Equilibrado</button>
+            <button onclick="setEscenarioScore('efic')" class="px-2.5 py-1 text-[11px] font-semibold rounded-md border border-slate-300 bg-white hover:bg-slate-100 text-slate-800 transition-all cursor-pointer" id="btnEscEfic">Arriendo</button>
+            <button onclick="setEscenarioScore('vol')" class="px-2.5 py-1 text-[11px] font-semibold rounded-md border border-slate-300 bg-white hover:bg-slate-100 text-slate-800 transition-all cursor-pointer" id="btnEscVol">Volumen</button>
+            <button onclick="setEscenarioScore('tend')" class="px-2.5 py-1 text-[11px] font-semibold rounded-md border border-slate-300 bg-white hover:bg-slate-100 text-slate-800 transition-all cursor-pointer" id="btnEscTend">Tendencia</button>
+          </div>
+        </div>
+        <details class="text-xs text-slate-600 pt-2 border-t border-slate-200">
+          <summary class="cursor-pointer font-semibold text-[#003058]">Personalizar</summary>
+          <div class="grid grid-cols-1 md:grid-cols-12 gap-4 items-center pt-3 mt-1">
+            <div class="md:col-span-7 space-y-2">
+              <div class="grid grid-cols-3 gap-2.5">
+                <div>
+                  <div class="flex justify-between text-[11px] font-semibold text-slate-600 mb-0.5"><span>Volumen</span> <span id="valPesoVolumen" class="font-bold text-pizarra-900">35%</span></div>
+                  <input type="range" min="10" max="70" step="5" value="35" id="sliderPesoVolumen" oninput="onPesoScoreChange()" class="w-full h-1.5 bg-slate-200 rounded appearance-none cursor-pointer accent-[#003058]">
+                </div>
+                <div>
+                  <div class="flex justify-between text-[11px] font-semibold text-slate-600 mb-0.5"><span>Arriendo</span> <span id="valPesoEficiencia" class="font-bold text-pizarra-900">40%</span></div>
+                  <input type="range" min="10" max="70" step="5" value="40" id="sliderPesoEficiencia" oninput="onPesoScoreChange()" class="w-full h-1.5 bg-slate-200 rounded appearance-none cursor-pointer accent-[#003058]">
+                </div>
+                <div>
+                  <div class="flex justify-between text-[11px] font-semibold text-slate-600 mb-0.5"><span>Tendencia</span> <span id="valPesoTendencia" class="font-bold text-pizarra-900">25%</span></div>
+                  <input type="range" min="10" max="70" step="5" value="25" id="sliderPesoTendencia" oninput="onPesoScoreChange()" class="w-full h-1.5 bg-slate-200 rounded appearance-none cursor-pointer accent-[#003058]">
+                </div>
+              </div>
+              <span class="text-[10px] text-slate-400 block" id="infoSumaPesos">Suma de pesos: 100%</span>
+            </div>
+            <div class="md:col-span-5 border-t md:border-t-0 md:border-l border-slate-200 pt-2 md:pt-0 md:pl-4 space-y-1.5">
+              <div class="flex items-center justify-between text-xs"><span class="text-slate-600 font-semibold">Score alto desde</span>
+                <input type="number" id="inpCorteAlto" value="65" min="50" max="85" step="1" onchange="onUmbralesScoreChange()" class="w-14 text-center border border-slate-300 rounded px-1.5 py-0.5 text-xs font-bold"></div>
+              <div class="flex items-center justify-between text-xs"><span class="text-slate-600 font-semibold">Score bajo hasta</span>
+                <input type="number" id="inpCorteBajo" value="45" min="20" max="55" step="1" onchange="onUmbralesScoreChange()" class="w-14 text-center border border-slate-300 rounded px-1.5 py-0.5 text-xs font-bold"></div>
+            </div>
+          </div>
+        </details>
+      </div>
+    </details>
+
+    <div class="card space-y-3">
+      <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
         <div class="flex items-center gap-2">
-          <h2 class="!mb-0 text-sm font-extrabold text-pizarra-900">Sedes según el plan</h2>
-          <span class="text-xs text-slate-500" id="txtFiltroArquetipoActivo">Mostrando todas las sedes</span>
+          <h3 class="!mb-0 text-sm font-extrabold text-slate-800">Sedes</h3>
+          <span class="text-xs text-slate-500" id="txtFiltroArquetipoActivo"></span>
         </div>
         <div class="flex items-center gap-2">
-          <input type="text" id="inpBuscarPortafolio" placeholder="Buscar por nombre, Id o zona..." oninput="filtrarTablaPortafolio()" class="text-xs px-2.5 py-1.5 rounded-lg border border-slate-200 bg-slate-50 focus:bg-white focus:outline-none w-64">
+          <input type="text" id="inpBuscarPortafolio" placeholder="Buscar sede o Id" oninput="filtrarTablaPortafolio()" class="text-xs px-2.5 py-1.5 rounded-lg border border-slate-200 bg-slate-50 focus:bg-white focus:outline-none w-52">
           <button onclick="limpiarFiltrosPortafolio()" class="text-xs text-slate-500 hover:text-slate-800 underline px-1 cursor-pointer">Ver todas</button>
         </div>
       </div>
-
-      <div id="portafolio-tabla-container" class="overflow-x-auto custom-scroll max-h-[560px]">
-        <!-- Inyectado por JS -->
-      </div>
+      <div id="portafolio-tabla-container" class="overflow-x-auto"></div>
+      <p class="text-[11px] text-slate-500"><span class="text-emerald-700"><svg class="inline w-3 h-3 -mt-0.5" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 6.5l2.5 2.5L10 3"/></svg></span> cumple la condición &nbsp;&nbsp; Montos en millones de pesos, VAN del cierre = VAN cerrar menos VAN mantener &nbsp;&nbsp; Volumen, Arriendo y Tendencia son el percentil de la sede en la red, de 0 a 100, donde más alto es mejor</p>
     </div>
-    <!-- Detalle: el puntaje describe, no decide -->
-    <details class="card">
-      <summary class="cursor-pointer text-sm font-extrabold text-pizarra-900">Detalle: puntaje descriptivo (volumen, arriendo y tendencia)</summary>
-      <p class="text-xs text-slate-500 mt-2 mb-3">Describe por qué una sede está en su grupo. No decide el grupo: eso lo hace el VAN del cierre.</p>
-        <!-- Barra de Enfoque de Priorización -->
-        <div class="space-y-2 bg-slate-50 p-3 rounded-xl border border-slate-200">
-          <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
-            <span class="text-xs font-bold text-slate-700">Enfoque del puntaje (descriptivo):</span>
-            <div class="flex flex-wrap gap-1.5">
-              <button onclick="setEscenarioScore('base')" class="px-2.5 py-1 text-[11px] font-semibold rounded-md border border-slate-300 bg-white hover:bg-slate-100 text-slate-800 transition-all cursor-pointer active-pill" id="btnEscBase">Equilibrado (Recomendado)</button>
-              <button onclick="setEscenarioScore('efic')" class="px-2.5 py-1 text-[11px] font-semibold rounded-md border border-slate-300 bg-white hover:bg-slate-100 text-slate-800 transition-all cursor-pointer" id="btnEscEfic">Priorizar ahorro de arriendo</button>
-              <button onclick="setEscenarioScore('vol')" class="px-2.5 py-1 text-[11px] font-semibold rounded-md border border-slate-300 bg-white hover:bg-slate-100 text-slate-800 transition-all cursor-pointer" id="btnEscVol">Priorizar volumen de venta</button>
-              <button onclick="setEscenarioScore('tend')" class="px-2.5 py-1 text-[11px] font-semibold rounded-md border border-slate-300 bg-white hover:bg-slate-100 text-slate-800 transition-all cursor-pointer" id="btnEscTend">Priorizar crecimiento</button>
-            </div>
-          </div>
-
-          <details class="text-xs text-slate-600 pt-2 border-t border-slate-200">
-            <summary class="cursor-pointer font-semibold text-[#003058]">Personalizar ponderaciones (opcional)</summary>
-            <div class="grid grid-cols-1 md:grid-cols-12 gap-4 items-center pt-3 mt-1">
-              <div class="md:col-span-7 space-y-2">
-                <span class="text-[11px] font-bold text-slate-700 block">Ponderación de Criterios:</span>
-                <div class="grid grid-cols-3 gap-2.5">
-                  <div>
-                    <div class="flex justify-between text-[11px] font-semibold text-slate-600 mb-0.5">
-                      <span>Volumen:</span> <span id="valPesoVolumen" class="font-bold text-pizarra-900">35%</span>
-                    </div>
-                    <input type="range" min="10" max="70" step="5" value="35" id="sliderPesoVolumen" oninput="onPesoScoreChange()" class="w-full h-1.5 bg-slate-200 rounded appearance-none cursor-pointer accent-[#003058]">
-                  </div>
-                  <div>
-                    <div class="flex justify-between text-[11px] font-semibold text-slate-600 mb-0.5">
-                      <span>Eficiencia:</span> <span id="valPesoEficiencia" class="font-bold text-pizarra-900">40%</span>
-                    </div>
-                    <input type="range" min="10" max="70" step="5" value="40" id="sliderPesoEficiencia" oninput="onPesoScoreChange()" class="w-full h-1.5 bg-slate-200 rounded appearance-none cursor-pointer accent-[#003058]">
-                  </div>
-                  <div>
-                    <div class="flex justify-between text-[11px] font-semibold text-slate-600 mb-0.5">
-                      <span>Tendencia:</span> <span id="valPesoTendencia" class="font-bold text-pizarra-900">25%</span>
-                    </div>
-                    <input type="range" min="10" max="70" step="5" value="25" id="sliderPesoTendencia" oninput="onPesoScoreChange()" class="w-full h-1.5 bg-slate-200 rounded appearance-none cursor-pointer accent-[#003058]">
-                  </div>
-                </div>
-                <span class="text-[10px] text-slate-400 block" id="infoSumaPesos">Suma de pesos: 100%</span>
-              </div>
-
-              <div class="md:col-span-5 border-t md:border-t-0 md:border-l border-slate-200 pt-2 md:pt-0 md:pl-4 space-y-1.5">
-                <span class="text-[11px] font-bold text-slate-700 block">Umbrales de Clasificación:</span>
-                <div class="flex items-center justify-between text-xs">
-                  <span class="text-slate-600 font-semibold">Corte Score Alto:</span>
-                  <input type="number" id="inpCorteAlto" value="65" min="50" max="85" step="1" onchange="onUmbralesScoreChange()" class="w-14 text-center border border-slate-300 rounded px-1.5 py-0.5 text-xs font-bold">
-                </div>
-                <div class="flex items-center justify-between text-xs">
-                  <span class="text-slate-600 font-semibold">Corte Score Bajo:</span>
-                  <input type="number" id="inpCorteBajo" value="45" min="20" max="55" step="1" onchange="onUmbralesScoreChange()" class="w-14 text-center border border-slate-300 rounded px-1.5 py-0.5 text-xs font-bold">
-                </div>
-              </div>
-            </div>
-          </details>
-        </div>
-    </details>
   </section>
 
   <section class="tab space-y-5" id="tab-cierre" hidden>
@@ -375,6 +310,7 @@
 
 
   <section class="tab space-y-5" id="tab-simulacion" hidden>
+    <div id="sim-pres" class="pres-only"></div>
     <!-- CABECERA Y PANEL DE CONTROL ESTOCASTICO -->
     <div class="card space-y-4">
       <div class="flex flex-col md:flex-row items-start md:items-center justify-between gap-3 pb-3 border-b border-slate-100">
@@ -394,22 +330,18 @@
         <span class="font-bold text-slate-700">Evaluar:</span>
         <div class="flex flex-wrap items-center gap-2">
           <label class="inline-flex items-center gap-1.5 cursor-pointer">
-            <input type="radio" name="simAlcance" value="CARTERA_ACTUAL" onchange="if(window.simCambiarAlcance) window.simCambiarAlcance(this.value)" class="text-[#003058] focus:ring-0">
-            <span class="font-medium text-slate-700">Cierres marcados en Demanda y VAN</span>
-          </label>
-          <label class="inline-flex items-center gap-1.5 cursor-pointer">
             <input type="radio" name="simAlcance" value="FASE_1" checked onchange="if(window.simCambiarAlcance) window.simCambiarAlcance(this.value)" class="text-[#003058] focus:ring-0">
-            <span class="font-medium text-slate-700">Cierres firmes</span>
+            <span class="font-medium text-slate-700">Cierres del plan</span>
           </label>
           <label class="inline-flex items-center gap-1.5 cursor-pointer">
             <input type="radio" name="simAlcance" value="FASE_1_2" onchange="if(window.simCambiarAlcance) window.simCambiarAlcance(this.value)" class="text-[#003058] focus:ring-0">
-            <span class="font-medium text-slate-700">Plan completo (con decididos)</span>
+            <span class="font-medium text-slate-700">Plan con decididos</span>
           </label>
           <label class="inline-flex items-center gap-1.5 cursor-pointer">
             <input type="radio" name="simAlcance" value="SEDE_INDIVIDUAL" onchange="if(window.simCambiarAlcance) window.simCambiarAlcance(this.value)" class="text-[#003058] focus:ring-0">
-            <span class="font-medium text-slate-700">Una sede:</span>
+            <span class="font-medium text-slate-700">Una sede</span>
           </label>
-          <select id="simSelSede" onchange="if(window.simCambiarSedeSel) window.simCambiarSedeSel(this.value)" class="border border-slate-300 rounded-lg px-2.5 py-1 text-xs bg-white text-slate-800 font-medium">
+          <select id="simSelSede" hidden onchange="if(window.simCambiarSedeSel) window.simCambiarSedeSel(this.value)" class="border border-slate-300 rounded-lg px-2.5 py-1 text-xs bg-white text-slate-800 font-medium">
             <!-- Inyectado por JS -->
           </select>
           <span class="text-slate-300">|</span>
@@ -419,11 +351,13 @@
             <option value="2500">2500</option>
             <option value="5000">5000</option>
           </select>
+          <span class="text-[#C2410C]">cambia el plan</span>
         </div>
       </div>
 
-      <p class="text-[11px] text-slate-500">Los supuestos centrales se fijan en Demanda y VAN y en Ajustes. Para moverlos a mano y ver su efecto, usa la pestaña Sensibilidad.</p>
     </div>
+
+    <div id="simSedeBarra" class="hidden"></div>
 
     <!-- FILA DE 6 TARJETAS KPI EJECUTIVAS -->
     <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3">
@@ -455,12 +389,6 @@
         <p class="text-[11px] text-slate-400 leading-tight" id="simKpiCvar5Sub"></p>
       </div>
 
-      <!-- KPI 5: Retencion Total vs Breakeven -->
-      <div class="card p-3.5 space-y-1 bg-white border border-slate-200">
-        <span class="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">Retención esperada y de equilibrio</span>
-        <div class="text-xl font-extrabold text-slate-900" id="simKpiRetencion">--</div>
-        <p class="text-[11px] text-slate-400 leading-tight" id="simKpiRetencionSub"></p>
-      </div>
     </div>
 
     <!-- FILA DE GRAFICOS INTERACTIVOS CHART.JS -->
@@ -485,6 +413,10 @@
           <canvas id="chartSimulacionDensidad"></canvas>
         </div>
       </div>
+      <div class="card xl:col-span-12 space-y-2 hidden" id="simMotoresCard">
+        <h2 class="!mb-0 text-sm font-extrabold text-slate-900" id="simMotoresTitulo">Qué mueve el resultado</h2>
+        <div id="simMotores"></div>
+      </div>
 
     </div>
 
@@ -502,8 +434,8 @@
           <select id="simFiltroClasificacion" onchange="if(window.simFiltrarTabla) window.simFiltrarTabla()" class="border border-slate-300 rounded-lg px-2.5 py-1 text-xs bg-white text-slate-800">
             <option value="TODAS">Todas</option>
             <option value="DECIDIDO">Cierres decididos</option>
-            <option value="PROPUESTO">Cierres firmes</option>
-            <option value="CONDICIONADO">Cierres condicionados</option>
+            <option value="PROPUESTO">Cierres del plan</option>
+            <option value="SEGUIMIENTO">En seguimiento</option>
             <option value="RED MÍNIMA">Red mínima</option>
           </select>
         </div>
@@ -523,13 +455,32 @@
       <div class="flex flex-wrap items-center justify-between gap-2">
         <h2 class="!mb-0 text-base font-extrabold text-[#1F2937]">Sensibilidad del VAN</h2>
         <div class="flex flex-wrap items-center gap-2">
-          <div class="seg-esc" id="sens-alcance" role="group" aria-label="Cierres incluidos"></div>
           <button type="button" class="btn-s" id="sens-reset">Volver al caso base</button>
         </div>
       </div>
-      <p class="text-xs text-slate-500">Mueve cada supuesto dentro de su rango y mira qué le pasa al VAN. Los cierres y sus fechas quedan como en el caso base; se recalcula solo el VAN de cada cierre.</p>
+      <div class="flex flex-wrap items-center gap-3 bg-slate-50 p-2.5 rounded-xl border border-slate-200 text-xs">
+        <span class="font-bold text-slate-700">Evaluar:</span>
+        <label class="inline-flex items-center gap-1.5 cursor-pointer"><input type="radio" name="sensAlc" value="plan" checked class="text-[#003058] focus:ring-0"><span class="font-medium text-slate-700">Cierres del plan</span></label>
+        <label class="inline-flex items-center gap-1.5 cursor-pointer"><input type="radio" name="sensAlc" value="todos" class="text-[#003058] focus:ring-0"><span class="font-medium text-slate-700">Plan con decididos</span></label>
+        <label class="inline-flex items-center gap-1.5 cursor-pointer"><input type="radio" name="sensAlc" value="sede" class="text-[#003058] focus:ring-0"><span class="font-medium text-slate-700">Una sede</span></label>
+        <select id="sens-sede" hidden class="border border-slate-300 rounded-lg px-2.5 py-1 text-xs bg-white text-slate-800 font-medium"></select>
+        <span class="text-slate-300">|</span>
+        <span class="font-bold text-slate-700">Escenarios Monte Carlo:</span>
+        <select id="sens-n" class="border border-slate-300 rounded-lg px-2 py-1 text-xs bg-white">
+          <option value="1000">1.000</option><option value="5000" selected>5.000</option><option value="10000">10.000</option><option value="20000">20.000</option>
+        </select>
+        <span class="text-slate-500">no cambia el plan</span>
+      </div>
       <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3" id="sens-controles"></div>
       <dl class="grid grid-cols-2 lg:grid-cols-4 gap-x-6 gap-y-3" id="sens-kpis"></dl>
+      <div class="rounded-xl border border-slate-200 p-3 space-y-2">
+        <div class="flex flex-wrap items-baseline justify-between gap-2">
+          <h3 class="!mb-0 text-sm font-extrabold text-slate-800">Con incertidumbre</h3>
+          <span class="text-[11px] text-slate-500" id="sens-mc-estado"></span>
+        </div>
+        <div class="overflow-x-auto"><table class="w-full text-xs tabular-nums" id="sens-mc-tabla"></table></div>
+        <div class="relative h-56"><canvas id="chartSensMC"></canvas></div>
+      </div>
       <div class="grid grid-cols-1 xl:grid-cols-2 gap-5">
         <div>
           <h3 class="text-sm font-extrabold text-slate-800">Qué supuesto mueve más el VAN</h3>
@@ -538,7 +489,7 @@
           <div class="relative h-72"><canvas id="chartSensTornado"></canvas></div>
         </div>
         <div>
-          <h3 class="text-sm font-extrabold text-slate-800">VAN del plan a lo largo de cada rango</h3>
+          <h3 class="text-sm font-extrabold text-slate-800">VAN a lo largo de cada rango</h3>
           <p class="text-[11px] text-slate-500 mb-2">Los cuatro supuestos con más efecto, del mínimo al máximo de su rango. La pendiente muestra cuánto pesa cada uno.</p>
           <div class="relative h-72"><canvas id="chartSensCurvas"></canvas></div>
         </div>
@@ -549,7 +500,7 @@
       </div>
       <div class="space-y-2">
         <div class="flex flex-wrap items-center gap-2">
-          <h3 class="!mb-0 text-sm font-extrabold text-slate-800">Doble entrada: VAN del plan</h3>
+          <h3 class="!mb-0 text-sm font-extrabold text-slate-800">Doble entrada: VAN</h3>
           <select id="sens-doble-a" class="border border-slate-300 rounded-lg px-2 py-1 text-xs" aria-label="Supuesto en las filas"></select>
           <span class="text-xs text-slate-500">frente a</span>
           <select id="sens-doble-b" class="border border-slate-300 rounded-lg px-2 py-1 text-xs" aria-label="Supuesto en las columnas"></select>
@@ -559,11 +510,6 @@
       </div>
       <p class="text-[11px] text-slate-400">VAN en millones de pesos, después de impuesto, a 10 años más valor terminal.</p>
     </div>
-    <details class="card space-y-3" id="sens-plan-caja" open>
-      <summary class="cursor-pointer text-base font-extrabold text-[#1F2937]">Si se rehace el plan con otros supuestos <span class="text-xs font-normal text-slate-500" id="sens-estado"></span></summary>
-      <p class="text-xs text-slate-500 mt-2">Aquí sí se vuelve a decidir qué sedes cierran y cuándo, con cada supuesto en un valor bajo y uno alto. Haz clic en un escenario para ver qué sedes cambian frente al caso base.</p>
-      <div id="sens-tabla" class="text-xs tabular-nums"></div>
-    </details>
   </section>
   <section class="tab space-y-5" id="tab-flexibilidad" hidden>
     <div class="card space-y-4">
@@ -571,24 +517,33 @@
         <h2 class="!mb-0 text-base font-extrabold text-[#1F2937]">Postergar el calendario</h2>
         <div class="seg-esc" id="flex-atraso" role="group" aria-label="Años de atraso"></div>
       </div>
+      <div class="flex flex-wrap items-center gap-3 bg-slate-50 p-2.5 rounded-xl border border-slate-200 text-xs">
+        <span class="font-bold text-slate-700">Evaluar:</span>
+        <label class="inline-flex items-center gap-1.5 cursor-pointer"><input type="radio" name="flexAlc" value="plan" checked class="text-[#003058] focus:ring-0"><span class="font-medium text-slate-700">Cierres del plan</span></label>
+        <label class="inline-flex items-center gap-1.5 cursor-pointer"><input type="radio" name="flexAlc" value="todos" class="text-[#003058] focus:ring-0"><span class="font-medium text-slate-700">Plan con decididos</span></label>
+        <label class="inline-flex items-center gap-1.5 cursor-pointer"><input type="radio" name="flexAlc" value="sede" class="text-[#003058] focus:ring-0"><span class="font-medium text-slate-700">Una sede</span></label>
+        <select id="flex-sede" hidden class="border border-slate-300 rounded-lg px-2.5 py-1 text-xs bg-white text-slate-800 font-medium"></select>
+        <span class="text-slate-300">|</span>
+        <span class="font-bold text-slate-700">Escenarios Monte Carlo:</span>
+        <select id="flex-n" class="border border-slate-300 rounded-lg px-2 py-1 text-xs bg-white">
+          <option value="1000">1.000</option><option value="5000" selected>5.000</option><option value="10000">10.000</option><option value="20000">20.000</option>
+        </select>
+        <span class="text-slate-500">no cambia el plan</span>
+        <span class="text-slate-500" id="flex-mc-estado"></span>
+      </div>
       <dl class="grid grid-cols-2 lg:grid-cols-4 gap-x-6 gap-y-3" id="flex-kpis"></dl>
       <div>
-        <h3 class="text-sm font-extrabold text-slate-800">Todo el plan: VAN de los cierres firmes según el atraso</h3>
-        <p class="text-[11px] text-slate-500 mb-2" id="flex-sub-plan">Suma de los cierres firmes. Haz clic en un punto para elegir el atraso.</p>
+        <h3 class="text-sm font-extrabold text-slate-800">VAN según el atraso</h3>
+        <p class="text-[11px] text-slate-500 mb-2" id="flex-sub-plan"></p>
         <div class="relative h-56"><canvas id="chartFlex"></canvas></div>
       </div>
       <div class="grid grid-cols-1 xl:grid-cols-3 gap-5 pt-2 border-t border-slate-100">
         <div class="xl:col-span-2">
-          <div class="flex flex-wrap items-center justify-between gap-2 mb-1">
-            <h3 class="!mb-0 text-sm font-extrabold text-slate-800">Sede por sede: fecha, costo de postergar y valor de esperar</h3>
-            <div class="seg-esc" id="flex-filtro" role="group" aria-label="Sedes que se muestran"></div>
-          </div>
-          <p class="text-[11px] text-slate-500 mb-2">Las sedes fuera del plan se muestran con su mejor fecha de cierre. Haz clic en una sede para ver su detalle a la derecha.</p>
+          <h3 class="text-sm font-extrabold text-slate-800 mb-1">Sede por sede</h3>
           <div id="flex-tabla" class="text-xs tabular-nums"></div>
         </div>
         <div class="xl:sticky xl:top-4 self-start rounded-lg border border-slate-200 bg-slate-50 p-3 space-y-3" id="flex-detalle"></div>
       </div>
-      <p class="text-[11px] text-slate-500">Decidir hoy: cerrar en la fecha del plan en todos los escenarios. Esperar y decidir: cerrar un año después solo en los escenarios en que el cierre sigue conviniendo. La diferencia es el valor de la flexibilidad.</p>
     </div>
   </section>
 

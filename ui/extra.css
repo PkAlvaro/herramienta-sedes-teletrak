@@ -66,7 +66,7 @@
     #acceso select, #acceso input { padding: 3px 6px; font-size: 12px; }
     .fld input[type=file] { font-size: 12px; color: #556273; max-width: 100%; }
     .btn-p { background: #003058; color: #fff; font-weight: 700; padding: 9px 18px; border-radius: 10px; font-size: 13px; }
-    .btn-p:hover:not(:disabled) { background: #00742F; }
+    .btn-p:hover:not(:disabled) { background: #002444; }
     .btn-p:disabled { opacity: .45; }
     .btn-s { background: #fff; color: #1F2937; font-weight: 600; padding: 6px 12px; border-radius: 10px; font-size: 12px; border: 1px solid #CBD5E1; }
     .btn-s:hover:not(:disabled) { background: #E8EEF5; color: #003058; border-color: #003058; }
@@ -93,6 +93,29 @@
     .prog { height: 6px; background: #E2E7EE; border-radius: 3px; overflow: hidden; }
     .prog > div { height: 100%; width: 0; background: #003058; transition: width .2s; }
     body.presentacion .solo-edicion { display: none !important; }
+    /* Modo presentacion: pantalla completa, solo Red, Estrategia y Riesgo, pocas cifras y grandes */
+    .pres-only { display: none !important; }
+    body.presentacion .pres-only { display: block !important; }
+    body.presentacion #nav .nav-tab[data-tab="cierre"],
+    body.presentacion #btn-guardar, body.presentacion #btn-excel, body.presentacion #btn-ajustes, body.presentacion #sel-estado { display: none !important; }
+    body.presentacion #tab-segmentos > :not(.pres-only), body.presentacion #tab-simulacion > :not(.pres-only),
+    body.presentacion #tab-demanda > :not(.pres-only), body.presentacion #tab-sensibilidad > :not(.pres-only), body.presentacion #tab-flexibilidad > :not(.pres-only) { display: none !important; }
+    body.presentacion #togglesDemanda, body.presentacion #simulador-demanda { display: none !important; }
+    body.presentacion #tab-red #red-zonas, body.presentacion #tab-red .xl\:col-span-4, body.presentacion #tab-red #leyenda, body.presentacion #tab-red #red-nota { display: none !important; }
+    body.presentacion #tab-red .xl\:col-span-8 { grid-column: 1 / -1 !important; }
+    body.presentacion #tab-red #mapa { height: calc(100vh - 330px) !important; }
+    body.presentacion main, body.presentacion .max-w-\[1560px\] { max-width: none !important; }
+    body.presentacion #tab-red .mapa-sticky { position: relative !important; top: 0 !important; }
+    body.presentacion #red-pres { position: absolute; top: 12px; right: 12px; z-index: 500; width: 280px; max-height: calc(100% - 24px); overflow-y: auto;
+      background: #fff; border-radius: 16px; box-shadow: 0 6px 18px rgba(15,27,45,.12); padding: 16px 18px; }
+    .pres-cifra { font-family: 'Barlow Semi Condensed', 'Inter', sans-serif; font-weight: 800; line-height: 1; }
+    .pres-caja { background: #fff; border-radius: 24px; border: 2px solid #E2E7EE; }
+    @media (max-width: 1100px) {
+      .pres-grid { grid-template-columns: minmax(0, 1fr) !important; height: auto !important; }
+      .pres-tarjetas { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+      .pres-cruce { grid-template-columns: 80px repeat(2, minmax(0, 1fr)) !important; grid-template-rows: auto repeat(2, 140px) !important; }
+      .pres-cruce > div { font-size: 15px !important; }
+    }
     .ficha { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 14px; font-size: 12px; }
     .ficha dt { color: #556273; font-size: 11px; }
     .ficha dd { margin: 0 0 6px; font-weight: 600; color: #0F1B2D; font-variant-numeric: tabular-nums; }
@@ -101,7 +124,7 @@
     /* Linea de tiempo del mapa */
     .tl { border: 1px solid #E2E7EE; border-radius: 14px; background: #fff; padding: 12px 16px 8px; }
     .tl-play { width: 44px; height: 44px; border-radius: 50%; background: #003058; display: grid; place-items: center; flex-shrink: 0; box-shadow: 0 1px 3px rgba(15,27,45,.2); transition: background .15s; }
-    .tl-play:hover { background: #00742F; }
+    .tl-play:hover { background: #002444; }
     .tl-play svg { width: 14px; height: 14px; fill: #fff; }
     #tiempo-lbl { font-family: 'Barlow Semi Condensed', 'Inter', sans-serif; font-size: 1.5rem; }
     .tl-chip { display: inline-block; margin-top: 3px; padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; }
@@ -186,8 +209,8 @@
     .seg-esc button { border: 0; background: none; color: #556273; font-weight: 600; font-size: 13px; padding: 7px 14px; border-radius: 8px; cursor: pointer; }
     .seg-esc button[aria-pressed="true"] { background: #003058; color: #fff; }
     details.plegado > summary { list-style: none; }
-    details.plegado > summary::after { content: " · Ver"; font-size: 12px; font-weight: 600; color: #003058; }
-    details.plegado[open] > summary::after { content: " · Ocultar"; }
+    details.plegado > summary::after { content: "Ver"; margin-left: 10px; font-size: 12px; font-weight: 600; color: #003058; }
+    details.plegado[open] > summary::after { content: "Ocultar"; }
 
     /* Simulador de cierres: botones sobrios (sin pasteles), contador como texto */
     .sim-limpio button:not(#closureGroupTabs button) { background: #fff !important; color: #0F1B2D !important; border: 1px solid #D9DFE7 !important;

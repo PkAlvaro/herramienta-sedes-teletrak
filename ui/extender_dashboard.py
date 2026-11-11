@@ -992,6 +992,19 @@ def extender(original):
               "#F8FAFC": "#F4F6F9"}
     h = re.sub("|".join(PALETA), lambda m: PALETA[m.group(0).upper()], h, flags=re.I)
     h = h.replace("rgba(34, 197, 94, 0.08)", "rgba(0, 48, 88, 0.08)").replace("rgba(21, 128, 61, 0.1)", "rgba(0, 48, 88, 0.1)")
+    # Retencion de cada cierre con el modelo del plan (Top-3 con tope de capacidad y canal digital del Censo), para que el
+    # grafico, el detalle de migracion y la tabla de flujos cuadren con el VAN del plan
+    h = reemplazar(h, "        const leakProb = denom > 0 ? (state.u0 / denom) : 1.0;",
+                   "        const rPlan = (typeof retencionPlan === 'function') ? retencionPlan(closedId) : null;\n"
+                   "        const leakProb = rPlan ? 1 - rPlan.fis : (denom > 0 ? (state.u0 / denom) : 1.0);")
+    h = reemplazar(h, """          recipientIds.forEach(recId => {
+            if (state.closedStores.has(recId)) return; // receptora cerrada no captura
+            if (!scores[recId]) return;
+            const p = denom > 0 ? (scores[recId] / denom) : 0.0;""",
+                   """          recipientIds.forEach(recId => {
+            if (!rPlan && state.closedStores.has(recId)) return; // receptora cerrada no captura
+            if (!rPlan && !scores[recId]) return;
+            const p = rPlan ? (rPlan.absorcion[recId] || 0) : (denom > 0 ? (scores[recId] / denom) : 0.0);""")
     # Flujos de migracion: nombres de sede en vez de codigos y montos en pesos completos
     h = reemplazar(h, "topRecipient: topRecId ? `${topRecId} (${(topRecProb * 100).toFixed(0)}%)` : 'Ninguna'",
                    "topRecipient: topRecId ? `${nombreLindo(DASHBOARD_DATA.locales[topRecId]?.nombre || topRecId)} (${(topRecProb * 100).toFixed(0)}%)` : 'Ninguna'")
